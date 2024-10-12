@@ -5,15 +5,23 @@ import os
 from urllib.parse import urlparse
 from scrapegraphai.graphs import SmartScraperGraph
 from typing import Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Get the directory of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
 # Define the configuration for the scraping pipeline
 graph_config = {
     "llm": {
-        "url": "http://localhost:11434/api/generate",  # Ollama REST API URL for LLaMA
-        "model": "ollama/llama3.1",
+        "url": os.getenv("LLM_URL", "http://localhost:11434/api/generate"),
+        "model": os.getenv("LLM_MODEL", "ollama/llama3.1"),
     },
-    "verbose": True,
-    "headless": True,
+    "verbose": os.getenv("VERBOSE", "True").lower() == "true",
+    "headless": os.getenv("HEADLESS", "True").lower() == "true",
 }
 
 FORMAT_INSTRUCTIONS = """
@@ -148,7 +156,7 @@ def process_url(url: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
 def save_result_to_file(result: Dict[str, Any], url: str):
     """Save the result to a JSON file in the specified directory."""
-    output_dir = "data/raw/llama"
+    output_dir = os.path.join(ROOT_DIR, os.getenv("OUTPUT_DIR", "data/raw/llama"))
     os.makedirs(output_dir, exist_ok=True)
     
     filename = get_filename_from_url(url)
@@ -159,18 +167,33 @@ def save_result_to_file(result: Dict[str, Any], url: str):
     
     print(f"Result saved to {filepath}")
 
-# List of URLs to process
-urls = [
-    "https://www.srh-hochschule-heidelberg.de/en/master/applied-computer-science/",
-    "https://www.srh-hochschule-heidelberg.de/en/why-srh/about-us/",
-    "https://www.srh-hochschule-heidelberg.de/en/study-at-srh/study-in-germany/"
-]
+def main():
+    # Load URLs from a config file
+    config_path = os.path.join(SCRIPT_DIR, 'config.json')
+    try:
+        with open(config_path, 'r') as config_file:
+            config = json.load(config_file)
+            urls = config.get('urls', [])
+    except FileNotFoundError:
+        print(f"Config file not found at {config_path}")
+        return
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON from {config_path}")
+        return
 
-# Process each URL and save results
-for url in urls:
-    print(f"\nProcessing URL: {url}")
-    result = process_url(url, graph_config)
-    print("Final result:")
-    print(json.dumps(result, indent=4))
-    save_result_to_file(result, url)
-    print("\n" + "="*50)
+    if not urls:
+        print("No URLs found in the config file.")
+        return
+
+    # Process each URL and save results
+    for url in urls:
+        print(f"\nProcessing URL: {url}")
+        result = process_url(url, graph_config)
+        print("Final result:")
+        print(json.dumps(result, indent=4))
+        save_result_to_file(result, url)
+        print("\n" + "="*50)
+
+if __name__ == "__main__":
+    main()
+    
