@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from urllib.parse import urlparse
 from crawl4ai import AsyncWebCrawler
 
@@ -17,12 +18,15 @@ async def crawl_and_save(url):
         # Generate filename from the last part of the URL
         filename = get_filename_from_url(url)
         
+        # Create the data/raw directory if it doesn't exist
+        os.makedirs('data/raw/async', exist_ok=True)
+        
         # Save the result as a .txt file
-        with open(f'{filename}.txt', 'w', encoding='utf-8') as txt_file:
+        with open(f'data/raw/async/{filename}.txt', 'w', encoding='utf-8') as txt_file:
             txt_file.write(result.markdown)
 
         # Save the result as a .json file
-        with open(f'{filename}.json', 'w', encoding='utf-8') as json_file:
+        with open(f'data/raw/async/{filename}.json', 'w', encoding='utf-8') as json_file:
             json.dump(result.__dict__, json_file, ensure_ascii=False, indent=4)
 
 async def main():
@@ -40,3 +44,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+ 
