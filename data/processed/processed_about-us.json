@@ -1,0 +1,29 @@
+[
+    {
+        "original_content": "Located in the heart of Heidelberg, one of Germany's most beautiful cities Wide range of undergraduate and graduate degree programs (BAs, MBAs, MScs) in business, media, and social sciences International student body with over 100 nationalities represented Strong focus on practical skills, entrepreneurship, and innovation Excellent job placement rates for graduates State-of-the-art facilities, including modern classrooms, libraries, and campus spaces Research-oriented approach with a strong emphasis on scientific inquiry and critical thinking",
+        "entities": [
+            [
+                "Heidelberg",
+                "ORG"
+            ],
+            [
+                "one",
+                "CARDINAL"
+            ],
+            [
+                "Germany",
+                "GPE"
+            ],
+            [
+                "MScs",
+                "ORG"
+            ],
+            [
+                "100",
+                "CARDINAL"
+            ]
+        ],
+        "topic": "Not enough documents for topic modeling",
+        "embedding": "Embedding generation failed: name 'generate_embeddings' is not defined"
+    }
+]
