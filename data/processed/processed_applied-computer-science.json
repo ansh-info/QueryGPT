@@ -1,0 +1,17 @@
+[
+    {
+        "original_content": "Focus on practical problem-solving Use of computational tools and methods to analyze and model complex systems Emphasis on collaboration with domain experts from other fields Application of data-driven insights to inform decision-making Development of novel solutions to real-world problems Interdisciplinary approach combining computer science, mathematics, statistics, and domain-specific knowledge",
+        "entities": [
+            [
+                "Emphasis",
+                "ORG"
+            ],
+            [
+                "Interdisciplinary",
+                "ORG"
+            ]
+        ],
+        "topic": "Not enough documents for topic modeling",
+        "embedding": "Embedding generation failed: name 'generate_embeddings' is not defined"
+    }
+]
