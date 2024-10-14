@@ -10,6 +10,9 @@ from keybert import KeyBERT
 from transformers import pipeline
 import torch
 
+from __init__ import path
+path()
+
 class NLPProcessor:
     def __init__(self):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -20,6 +23,7 @@ class NLPProcessor:
         self.key_bert = KeyBERT(model=self.sentence_model)
         self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device=0 if self.device == 'cuda' else -1)
 
+    # ... [rest of the methods remain unchanged] ...
     def perform_ner(self, text):
         doc = self.nlp(text)
         entities = [(ent.text, ent.label_) for ent in doc.ents]
@@ -115,8 +119,8 @@ class NLPProcessor:
                     print(f"Error processing {filename}: {str(e)}")
 
 def main():
-    input_dir = '../raw/async'  # Directory containing your JSON files
-    output_dir = '../processed'  # Directory to save processed data
+    input_dir = os.path.join('data', 'raw', 'async')  # Directory containing your JSON files
+    output_dir = os.path.join('data', 'processed')  # Directory to save processed data
 
     processor = NLPProcessor()
     processor.process_directory(input_dir, output_dir)

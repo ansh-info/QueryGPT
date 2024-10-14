@@ -3,6 +3,10 @@ import os
 import spacy
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
+import numpy as np
+
+from __init__ import path
+path()
 
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
@@ -15,21 +19,18 @@ def perform_ner(text):
     entities = [(ent.text, ent.label_) for ent in doc.ents]
     return entities
 
-def topic_modeling(texts, num_topics=5, num_words=10):
+def topic_modeling(texts, num_topics=2, num_words=5):
     if len(texts) < 2:
         return ["Not enough documents for topic modeling"]
     
-    # Start with very permissive parameters
     vectorizer = CountVectorizer(max_df=1.0, min_df=1, stop_words='english')
     try:
         doc_term_matrix = vectorizer.fit_transform(texts)
     except ValueError:
         return ["Unable to perform topic modeling due to document similarity"]
     
-    # Check if we have enough features for LDA
     n_features = doc_term_matrix.shape[1]
-    if n_features < num_topics:
-        num_topics = max(2, n_features - 1)  # Ensure at least 2 topics if possible
+    num_topics = min(num_topics, n_features - 1)  # Ensure num_topics is less than n_features
     
     lda = LatentDirichletAllocation(n_components=num_topics, random_state=42)
     lda.fit(doc_term_matrix)
@@ -42,7 +43,11 @@ def topic_modeling(texts, num_topics=5, num_words=10):
     
     return topics
 
-# Modify the process_file function to handle potential errors
+def generate_embeddings(texts):
+    # Using TF-IDF for simple embeddings
+    tfidf_matrix = tfidf_vectorizer.fit_transform(texts)
+    return tfidf_matrix.toarray().tolist()
+
 def process_file(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
@@ -50,21 +55,15 @@ def process_file(file_path):
     all_texts = []
     processed_data = []
 
-    # Check if data is a list or a single item
-    if isinstance(data, list):
-        items = data
-    else:
-        items = [data]
+    items = data if isinstance(data, list) else [data]
     
     for item in items:
-        # Check if item is a string (entire content) or a dictionary
         if isinstance(item, str):
             text = item
         elif isinstance(item, dict):
             if 'llm_response' in item and isinstance(item['llm_response'], dict):
                 text = ' '.join(item['llm_response'].get('key_points', []))
             else:
-                # If structure is different, try to extract text from known fields
                 text = item.get('content', '') or item.get('text', '') or str(item)
         else:
             text = str(item)
@@ -73,7 +72,6 @@ def process_file(file_path):
         processed_item = {'original_content': text}
         processed_data.append(processed_item)
     
-    # Perform NLP processing
     try:
         topics = topic_modeling(all_texts)
     except Exception as e:
@@ -87,24 +85,27 @@ def process_file(file_path):
     for i, processed_item in enumerate(processed_data):
         text = processed_item['original_content']
         processed_item['entities'] = perform_ner(text)
-        processed_item['topic'] = topics[0] if len(topics) > 0 else "No topic available"
-        processed_item['embedding'] = embeddings[i] if i < len(embeddings) else "No embedding available"
+        processed_item['topics'] = topics
+        processed_item['embedding'] = embeddings[i] if isinstance(embeddings[i], list) else str(embeddings[i])
     
     return processed_data
 
-# Process all files
-input_dir = '../raw/llama'
-output_dir = '../processed'
-os.makedirs(output_dir, exist_ok=True)
+def main():
+    input_dir = os.path.join('data', 'raw', 'llama')
+    output_dir = os.path.join('data', 'processed')
+    os.makedirs(output_dir, exist_ok=True)
 
-for filename in os.listdir(input_dir):
-    if filename.endswith('.json'):
-        input_path = os.path.join(input_dir, filename)
-        output_path = os.path.join(output_dir, f"processed_{filename}")
-        
-        processed_data = process_file(input_path)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(processed_data, f, ensure_ascii=False, indent=4)
-        
-        print(f"Processed data saved to {output_path}")
+    for filename in os.listdir(input_dir):
+        if filename.endswith('.json'):
+            input_path = os.path.join(input_dir, filename)
+            output_path = os.path.join(output_dir, f"processed_{filename}")
+            
+            processed_data = process_file(input_path)
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(processed_data, f, ensure_ascii=False, indent=4)
+            
+            print(f"Processed data saved to {output_path}")
+
+if __name__ == "__main__":
+    main()

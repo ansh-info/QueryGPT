@@ -7,12 +7,11 @@ from scrapegraphai.graphs import SmartScraperGraph
 from typing import Dict, Any
 from dotenv import load_dotenv
 
+from __init__ import path
+path()
+
 # Load environment variables
 load_dotenv()
-
-# Get the directory of the current script
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
 # Define the configuration for the scraping pipeline
 graph_config = {
@@ -61,7 +60,6 @@ def parse_llm_output(output: str) -> Dict[str, Any]:
     print("Parsing LLM output:")
     print(output)
     
-    # Extract the JSON object from the output
     json_match = re.search(r'```\s*(.*?)\s*```', output, re.DOTALL)
     if json_match:
         json_str = json_match.group(1)
@@ -69,7 +67,6 @@ def parse_llm_output(output: str) -> Dict[str, Any]:
             parsed_json = json.loads(json_str)
             print("Extracted JSON:", json.dumps(parsed_json, indent=2))
             
-            # Handle nested 'topic' structure
             if isinstance(parsed_json.get('topic'), dict):
                 topic = parsed_json['topic'].get('name', '') + ': ' + parsed_json['topic'].get('description', '')
             else:
@@ -86,7 +83,6 @@ def parse_llm_output(output: str) -> Dict[str, Any]:
     else:
         print("No JSON found in the output")
     
-    # Fallback to the previous parsing method if JSON extraction fails
     key_points_match = re.search(r'\[(.*?)\]', output, re.DOTALL)
     if key_points_match:
         key_points_str = key_points_match.group(1)
@@ -108,7 +104,6 @@ def parse_llm_output(output: str) -> Dict[str, Any]:
     }
 
 def get_prompt_for_url(url: str) -> str:
-    """Generate a content-specific prompt based on the URL being scraped."""
     if "applied-computer-science" in url:
         return "What is applied computer science? Provide a brief overview and key points."
     elif "about-us" in url:
@@ -119,7 +114,6 @@ def get_prompt_for_url(url: str) -> str:
         return "Provide a brief overview and key points about the content of this page."
 
 def get_filename_from_url(url: str) -> str:
-    """Extract the last part of the URL to use as a filename."""
     path = urlparse(url).path
     last_part = path.strip('/').split('/')[-1]
     return f"{last_part}.json" if last_part else "index.json"
@@ -145,7 +139,6 @@ def process_url(url: str, config: Dict[str, Any]) -> Dict[str, Any]:
         print(llm_result)
         smart_scraper_graph.llm_response = {"error": "Failed to parse LLM output"}
 
-    # Monkey patch the SmartScraperGraph to bypass its JSON parsing
     def patched_run(self):
         self.final_state = {"llm_response": self.llm_response}
         return self.final_state
@@ -155,8 +148,7 @@ def process_url(url: str, config: Dict[str, Any]) -> Dict[str, Any]:
     return smart_scraper_graph.run()
 
 def save_result_to_file(result: Dict[str, Any], url: str):
-    """Save the result to a JSON file in the specified directory."""
-    output_dir = os.path.join(ROOT_DIR, os.getenv("OUTPUT_DIR", "data/raw/llama"))
+    output_dir = os.path.join('data', 'raw', 'llama')
     os.makedirs(output_dir, exist_ok=True)
     
     filename = get_filename_from_url(url)
@@ -168,8 +160,7 @@ def save_result_to_file(result: Dict[str, Any], url: str):
     print(f"Result saved to {filepath}")
 
 def main():
-    # Load URLs from a config file
-    config_path = os.path.join(SCRIPT_DIR, 'config.json')
+    config_path = os.path.join('scraper', 'config.json')
     try:
         with open(config_path, 'r') as config_file:
             config = json.load(config_file)
@@ -185,7 +176,6 @@ def main():
         print("No URLs found in the config file.")
         return
 
-    # Process each URL and save results
     for url in urls:
         print(f"\nProcessing URL: {url}")
         result = process_url(url, graph_config)
@@ -196,4 +186,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

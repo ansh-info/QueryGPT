@@ -6,10 +6,13 @@ import spacy
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 from textblob import TextBlob
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from keybert import KeyBERT
 import warnings
 import torch
+
+from __init__ import path
+path()
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -110,15 +113,32 @@ class NLPProcessor:
             print(f"Error in keyword extraction: {e}")
             return []
 
+    def extract_text_from_json(self, data: Dict[str, Any]) -> str:
+        if isinstance(data, dict):
+            if 'llm_response' in data and isinstance(data['llm_response'], dict):
+                topic = data['llm_response'].get('topic', '')
+                key_points = ' '.join(data['llm_response'].get('key_points', []))
+                return f"{topic} {key_points}"
+            elif 'cleaned_html' in data:
+                return data['cleaned_html']
+            else:
+                return ' '.join(str(value) for value in data.values() if isinstance(value, (str, int, float)))
+        elif isinstance(data, list):
+            return ' '.join(self.extract_text_from_json(item) for item in data if isinstance(item, dict))
+        else:
+            return str(data)
+
     def process_file(self, file_path: str) -> Dict[str, Any]:
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 data = json.load(file)
             
-            text = data.get('cleaned_html', '')
+            text = self.extract_text_from_json(data)
+            if not text.strip():
+                raise ValueError("Empty or invalid text content in file")
             
             return {
-                'original_content': text,
+                'original_content': text[:1000],  # Truncate for brevity
                 'entities': self.perform_ner(text),
                 'topics': self.topic_modeling([text]),
                 'embedding': self.generate_embedding(text),
@@ -153,8 +173,8 @@ class NLPProcessor:
                 torch.cuda.empty_cache()
 
 def main():
-    input_dir = '../raw/async'  # Directory containing your JSON files
-    output_dir = '../processed'  # Directory to save processed data
+    input_dir = os.path.join('data', 'raw', 'llama')  # Directory containing your JSON files
+    output_dir = os.path.join('data', 'processed')  # Directory to save processed data
 
     processor = NLPProcessor()
     processor.process_directory(input_dir, output_dir)

@@ -9,6 +9,9 @@ from textblob import TextBlob
 from transformers import pipeline
 import warnings
 
+from __init__ import path
+path()
+
 # Suppress warnings
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -80,6 +83,11 @@ class NLPProcessor:
         if self.summarizer is None:
             return self.fallback_summarization(text, max_length)
         try:
+            input_length = len(text.split())
+            if input_length < max_length:
+                max_length = max(min_length, input_length - 1)  # Ensure max_length is at least 1 less than input_length
+            min_length = min(min_length, max_length - 1)  # Ensure min_length is less than max_length
+            
             summary = self.summarizer(text[:1024], max_length=max_length, min_length=min_length, do_sample=False)
             return summary[0]['summary_text']
         except Exception as e:
@@ -104,13 +112,28 @@ class NLPProcessor:
             print(f"Error in keyword extraction: {e}")
             return []
 
+    def extract_text_from_json(self, data: Dict[str, Any]) -> str:
+        if isinstance(data, dict):
+            if 'llm_response' in data and isinstance(data['llm_response'], dict):
+                topic = data['llm_response'].get('topic', '')
+                key_points = ' '.join(data['llm_response'].get('key_points', []))
+                return f"{topic} {key_points}"
+            elif 'cleaned_html' in data:
+                return data['cleaned_html']
+            else:
+                return ' '.join(str(value) for value in data.values() if isinstance(value, (str, int, float)))
+        elif isinstance(data, list):
+            return ' '.join(self.extract_text_from_json(item) for item in data if isinstance(item, dict))
+        else:
+            return str(data)
+
     def process_file(self, file_path: str) -> Dict[str, Any]:
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 data = json.load(file)
             
-            text = data.get('cleaned_html', '')
-            if not text:
+            text = self.extract_text_from_json(data)
+            if not text.strip():
                 raise ValueError("Empty or invalid text content in file")
             
             return {
@@ -119,7 +142,7 @@ class NLPProcessor:
                 'topics': self.topic_modeling([text]),
                 'embedding': self.generate_embedding(text),
                 'sentiment': self.perform_sentiment_analysis(text),
-                'summary': self.summarize_text(text),
+                'summary': self.summarize_text(text, max_length=150, min_length=50),  # Customized values
                 'keywords': self.extract_keywords(text)
             }
         except Exception as e:
@@ -145,8 +168,8 @@ class NLPProcessor:
                     print(f"Error processing {filename}: {str(e)}")
 
 def main():
-    input_dir = '../raw/async'  # Directory containing your JSON files
-    output_dir = '../processed'  # Directory to save processed data
+    input_dir = os.path.join('data', 'raw', 'llama')  # Directory containing your JSON files
+    output_dir = os.path.join('data', 'processed')  # Directory to save processed data
 
     processor = NLPProcessor()
     processor.process_directory(input_dir, output_dir)
