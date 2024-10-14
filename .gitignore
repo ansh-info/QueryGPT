@@ -162,4 +162,7 @@ cython_debug/
 #.idea/
 
 # exapmle path
-/data/raw/
+*.json
+!config.json
+*.ipynb_checkpoints
+*.ipynb
