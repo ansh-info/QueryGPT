@@ -5,7 +5,6 @@ import qdrant_client
 from qdrant_client.http import models
 import requests
 import uvicorn
-import json
 
 app = FastAPI()
 
@@ -75,6 +74,14 @@ def extract_relevant_info(result):
 @app.post("/search")
 async def search(query: Query):
     try:
+        # Check if the query is a simple greeting
+        if query.text.lower() in ["hi", "hello", "hey"]:
+            return {
+                "search_results": [],
+                "ai_response": "Hello! How can I assist you with information about " " today?"
+            }
+
+        # Proceed with the search if it's not a simple greeting
         search_results = search_qdrant(query.text)
         results = []
         context = ""
@@ -87,6 +94,12 @@ async def search(query: Query):
                 "score": result.score
             })
         
+        if not results:
+            return {
+                "search_results": [],
+                "ai_response": "I couldn't find any specific information related to your query. Can you please provide more details or ask a more specific question about " " ?"
+            }
+
         prompt = f"""Based on the following context, answer the question. If the answer is not in the context, say "I don't have enough information to answer that question."
 
 Context:
