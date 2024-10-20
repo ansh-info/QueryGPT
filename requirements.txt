@@ -42,6 +42,7 @@ exceptiongroup
 executing
 faiss-cpu
 fastjsonschema
+fastapi
 fonttools
 fqdn
 free_proxy
@@ -228,6 +229,7 @@ tzdata
 undetected-playwright
 uri-template
 uritemplate
+uvicorn
 wasabi
 wcwidth
 weasel

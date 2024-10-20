@@ -166,3 +166,4 @@ cython_debug/
 !config.json
 *.ipynb_checkpoints
 *.ipynb
+.DS_Store
