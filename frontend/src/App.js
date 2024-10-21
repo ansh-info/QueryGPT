@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Send, Menu, X, Copy, Share2, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, Database, Globe } from 'lucide-react';
+import { Search, Send, Menu, X, Copy, Share2, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, Database, Globe, Info } from 'lucide-react';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -34,6 +34,7 @@ export default function App() {
         isFromKnowledgeBase: response.data.is_from_knowledge_base,
         relevanceScore: response.data.relevance_score,
         searchResults: response.data.search_results,
+        searchInfo: response.data.search_info,
       };
       setConversation(prev => [...prev, newMessage, aiResponse]);
       setQuery('');
@@ -120,6 +121,14 @@ export default function App() {
                       <span className="text-xs text-gray-500">
                         {message.isFromKnowledgeBase ? `Knowledge Base (Relevance: ${(message.relevanceScore * 100).toFixed(2)}%)` : 'General Knowledge'}
                       </span>
+                      {message.searchInfo && (
+                        <div className="ml-2 relative group">
+                          <Info size={16} className="text-gray-400 cursor-help" />
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded py-1 px-2 hidden group-hover:block whitespace-nowrap">
+                            {message.searchInfo}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   <p className="whitespace-pre-wrap">{message.content}</p>
