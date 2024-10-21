@@ -147,6 +147,13 @@ async def search(query: Query, request: Request):
     rate_limit(request)
     
     try:
+        # Check if the query is a simple greeting
+        if query.text.lower() in ["hi", "hello", "hey"]:
+            return {
+                "search_results": [],
+                "ai_response": "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?"
+            }
+
         preprocessed_query = preprocess_query(query.text)
         expanded_queries = expand_query(preprocessed_query)
         
@@ -164,7 +171,7 @@ async def search(query: Query, request: Request):
         context = "\n\n".join([r.content for r in results])
         
         if not results:
-            ai_response = "I couldn't find any specific information related to your query. Can you please provide more details or ask a more specific question?"
+            ai_response = "I couldn't find any specific information related to your query. Can you please provide more details or ask a more specific question about SRH Hochschule Heidelberg?"
         else:
             prompt = f"""Based on the following context, answer the question. If the answer is not in the context, say "I don't have enough information to answer that question."
 
