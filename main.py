@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import qdrant_client
@@ -10,6 +10,7 @@ from datetime import datetime
 import logging
 from functools import lru_cache
 import time
+from collections import Counter
 
 app = FastAPI()
 
@@ -142,6 +143,39 @@ def extract_relevant_info(result) -> SearchResult:
         date=payload.get('date')
     )
 
+def get_knowledge_base_summary():
+    try:
+        # Fetch all entries from the Qdrant collection
+        entries = qdrant_client.scroll(
+            collection_name="knowledge_base",
+            limit=1000  # Adjust based on your knowledge base size
+        )[0]
+
+        # Extract categories and keywords
+        categories = Counter()
+        all_keywords = Counter()
+        entry_count = len(entries)
+        
+        for entry in entries:
+            payload = entry.payload
+            categories[payload.get('category', 'Uncategorized')] += 1
+            keywords = payload.get('keywords', [])
+            all_keywords.update(keywords)
+
+        # Get top categories and keywords
+        top_categories = categories.most_common(5)
+        top_keywords = all_keywords.most_common(10)
+
+        # Generate summary
+        summary = f"My knowledge base contains {entry_count} entries covering various topics. "
+        summary += "The main categories include: " + ", ".join(f"{cat} ({count})" for cat, count in top_categories) + ". "
+        summary += "Some key topics covered are: " + ", ".join(keyword for keyword, _ in top_keywords) + "."
+
+        return summary
+    except Exception as e:
+        logger.error(f"Error generating knowledge base summary: {str(e)}")
+        return "I have information about SRH Hochschule Heidelberg and Applied Computer Science, but I'm unable to provide a detailed summary of my knowledge base at the moment."
+
 @app.post("/search")
 async def search(query: Query, request: Request):
     rate_limit(request)
@@ -152,6 +186,14 @@ async def search(query: Query, request: Request):
             return {
                 "search_results": [],
                 "ai_response": "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?"
+            }
+
+        # Check if the query is about the knowledge base content
+        if query.text.lower() in ["what is in your knowledge base?", "what do you know?", "what information do you have?"]:
+            summary = get_knowledge_base_summary()
+            return {
+                "search_results": [],
+                "ai_response": summary
             }
 
         preprocessed_query = preprocess_query(query.text)
