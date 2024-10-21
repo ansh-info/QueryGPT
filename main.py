@@ -5,12 +5,15 @@ import qdrant_client
 from qdrant_client.http import models
 import requests
 import uvicorn
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 import logging
 from functools import lru_cache
 import time
 from collections import Counter
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 app = FastAPI()
 
@@ -63,11 +66,9 @@ def rate_limit(request: Request):
     request_history[client] = request_times
 
 def preprocess_query(query: str) -> str:
-    # Simple preprocessing: lowercase and strip whitespace
     return query.lower().strip()
 
 def expand_query(query: str) -> List[str]:
-    # Simple query expansion
     expanded = [query]
     if "srh" in query:
         expanded.append(query.replace("srh", "srh hochschule heidelberg"))
@@ -145,13 +146,11 @@ def extract_relevant_info(result) -> SearchResult:
 
 def get_knowledge_base_summary():
     try:
-        # Fetch all entries from the Qdrant collection
         entries = qdrant_client.scroll(
             collection_name="knowledge_base",
-            limit=1000  # Adjust based on your knowledge base size
+            limit=1000
         )[0]
 
-        # Extract categories and keywords
         categories = Counter()
         all_keywords = Counter()
         entry_count = len(entries)
@@ -162,11 +161,9 @@ def get_knowledge_base_summary():
             keywords = payload.get('keywords', [])
             all_keywords.update(keywords)
 
-        # Get top categories and keywords
         top_categories = categories.most_common(5)
         top_keywords = all_keywords.most_common(10)
 
-        # Generate summary
         summary = f"My knowledge base contains {entry_count} entries covering various topics. "
         summary += "The main categories include: " + ", ".join(f"{cat} ({count})" for cat, count in top_categories) + ". "
         summary += "Some key topics covered are: " + ", ".join(keyword for keyword, _ in top_keywords) + "."
@@ -176,46 +173,82 @@ def get_knowledge_base_summary():
         logger.error(f"Error generating knowledge base summary: {str(e)}")
         return "I have information about SRH Hochschule Heidelberg and Applied Computer Science, but I'm unable to provide a detailed summary of my knowledge base at the moment."
 
+def get_database_keywords() -> List[str]:
+    entries = qdrant_client.scroll(
+        collection_name="knowledge_base",
+        limit=1000
+    )[0]
+
+    all_keywords = []
+    for entry in entries:
+        keywords = entry.payload.get('keywords', [])
+        all_keywords.extend(keywords)
+
+    return list(set(all_keywords))
+
+def is_query_relevant(query: str, threshold: float = 0.1) -> Tuple[bool, float]:
+    keywords = get_database_keywords()
+    
+    texts = keywords + [query]
+    
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(texts)
+    
+    query_vec = tfidf_matrix[-1]
+    keyword_vecs = tfidf_matrix[:-1]
+    similarities = cosine_similarity(query_vec, keyword_vecs)
+    
+    max_similarity = np.max(similarities)
+    is_relevant = max_similarity > threshold
+    
+    # Convert numpy types to Python types
+    return bool(is_relevant), float(max_similarity)
+
 @app.post("/search")
 async def search(query: Query, request: Request):
     rate_limit(request)
     
     try:
-        # Check if the query is a simple greeting
         if query.text.lower() in ["hi", "hello", "hey"]:
             return {
                 "search_results": [],
-                "ai_response": "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?"
+                "ai_response": "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?",
+                "is_from_knowledge_base": False,
+                "relevance_score": 0.0
             }
 
-        # Check if the query is about the knowledge base content
         if query.text.lower() in ["what is in your knowledge base?", "what do you know?", "what information do you have?"]:
             summary = get_knowledge_base_summary()
             return {
                 "search_results": [],
-                "ai_response": summary
+                "ai_response": summary,
+                "is_from_knowledge_base": True,
+                "relevance_score": 1.0
             }
 
         preprocessed_query = preprocess_query(query.text)
-        expanded_queries = expand_query(preprocessed_query)
-        
-        all_results = []
-        for expanded_query in expanded_queries:
-            search_results = search_qdrant(expanded_query, query.filters)
-            all_results.extend(search_results)
-        
-        # Deduplicate and sort results
-        unique_results = list({r.id: r for r in all_results}.values())
-        unique_results.sort(key=lambda x: x.score, reverse=True)
-        
-        results = [extract_relevant_info(result) for result in unique_results[:5]]
-        
-        context = "\n\n".join([r.content for r in results])
-        
-        if not results:
-            ai_response = "I couldn't find any specific information related to your query. Can you please provide more details or ask a more specific question about SRH Hochschule Heidelberg?"
-        else:
-            prompt = f"""Based on the following context, answer the question. If the answer is not in the context, say "I don't have enough information to answer that question."
+        is_relevant, relevance_score = is_query_relevant(preprocessed_query)
+
+        # Convert numpy.bool_ to Python bool
+        is_relevant = bool(is_relevant)
+        # Convert numpy.float64 to Python float
+        relevance_score = float(relevance_score)
+
+        if is_relevant:
+            expanded_queries = expand_query(preprocessed_query)
+            all_results = []
+            for expanded_query in expanded_queries:
+                search_results = search_qdrant(expanded_query, query.filters)
+                all_results.extend(search_results)
+            
+            unique_results = list({r.id: r for r in all_results}.values())
+            unique_results.sort(key=lambda x: x.score, reverse=True)
+            
+            results = [extract_relevant_info(result) for result in unique_results[:5]]
+            
+            context = "\n\n".join([r.content for r in results])
+            
+            prompt = f"""Based on the following context, answer the question. If the answer is not in the context, use your general knowledge to provide a helpful response.
 
 Context:
 {context}
@@ -225,10 +258,20 @@ Question: {query.text}
 Answer:"""
             
             ai_response = query_ollama(prompt)
-        
+        else:
+            prompt = f"""You are an AI assistant for SRH Hochschule Heidelberg. Answer the following question to the best of your ability using your general knowledge. If you're not sure about specific details related to SRH Hochschule Heidelberg, inform the user that you may not have up-to-date or specific information about the university.
+
+Question: {query.text}
+
+Answer:"""
+            ai_response = query_ollama(prompt)
+            results = []
+
         return {
             "search_results": results,
-            "ai_response": ai_response
+            "ai_response": ai_response,
+            "is_from_knowledge_base": is_relevant,
+            "relevance_score": relevance_score
         }
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
@@ -237,7 +280,6 @@ Answer:"""
 @app.post("/feedback")
 async def submit_feedback(feedback: dict, request: Request):
     rate_limit(request)
-    # Implement feedback collection (e.g., store in a database or file)
     logger.info(f"Received feedback: {feedback}")
     return {"status": "Feedback received"}
 
