@@ -1,9 +1,9 @@
-import React, { useState, useRef } from 'react';
-import { Search, Send, Menu, X, Copy, Share2, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
+import { Search, Send, Menu, X, Copy, Share2, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, Database, Globe } from 'lucide-react';
 
 export default function App() {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
   const [conversation, setConversation] = useState([]);
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
@@ -11,24 +11,31 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [expandedResults, setExpandedResults] = useState({});
   const searchInputRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [conversation]);
 
   const handleSearch = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      // Simulating API call
-      const response = await new Promise(resolve => setTimeout(() => resolve({
-        search_results: [
-          { content: "SRH Hochschule Heidelberg: A private university with campuses in Heidelberg and Bad Homburg, Germany, offering a wide range of undergraduate and graduate degree programs in business, media, and social sciences. Located in the heart of Heidelberg, one of Germany's most beautiful cities Wide range of undergraduate and graduate degree programs.", score: 0.8586 },
-          { content: "Another sample search result about SRH Hochschule Heidelberg.", score: 0.7524 }
-        ],
-        ai_response: "Based on the search results, here's what I can tell you about SRH Hochschule Heidelberg:\n\n1. It's a private university located in Germany.\n2. It has campuses in Heidelberg and Bad Homburg.\n3. The university offers a wide range of undergraduate and graduate degree programs.\n4. The main focus areas are business, media, and social sciences.\n5. It's situated in the heart of Heidelberg, which is considered one of Germany's most beautiful cities.\n\nThe university seems to provide a diverse educational experience in a picturesque setting. Is there anything specific you'd like to know more about, such as admission processes, specific programs, or student life?"
-      }), 1000));
-      
-      setResults(response.search_results);
-      const newResponse = response.ai_response;
-      setConversation(prev => [...prev, { type: 'user', content: query }, { type: 'ai', content: newResponse }]);
-      setExpandedResults({});
+      const response = await axios.post('http://localhost:8000/search', { text: query });
+      const newMessage = {
+        type: 'user',
+        content: query,
+      };
+      const aiResponse = {
+        type: 'ai',
+        content: response.data.ai_response,
+        isFromKnowledgeBase: response.data.is_from_knowledge_base,
+        relevanceScore: response.data.relevance_score,
+        searchResults: response.data.search_results,
+      };
+      setConversation(prev => [...prev, newMessage, aiResponse]);
       setQuery('');
 
       if (!currentChatId) {
@@ -46,7 +53,6 @@ export default function App() {
   const startNewChat = () => {
     setCurrentChatId(null);
     setConversation([]);
-    setResults([]);
     setQuery('');
   };
 
@@ -55,7 +61,6 @@ export default function App() {
     // Here you would load the conversation for the selected chat
     // This would typically involve a backend call to retrieve the chat history
     setConversation([]); // Placeholder: replace with actual chat loading logic
-    setResults([]);
   };
 
   const toggleResultExpansion = (index) => {
@@ -99,50 +104,57 @@ export default function App() {
           <h1 className="text-2xl font-bold text-indigo-700">Knowledge Base Search</h1>
         </header>
 
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-4">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-4" ref={chatContainerRef}>
           {/* Conversation */}
-          <div className="max-w-3xl mx-auto mb-8">
+          <div className="max-w-3xl mx-auto space-y-4">
             {conversation.map((message, index) => (
-              <div key={index} className={`mb-4 ${message.type === 'user' ? 'text-right' : ''}`}>
-                <div className={`inline-block max-w-md p-4 rounded-lg ${
+              <div key={index} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-md p-4 rounded-lg ${
                   message.type === 'user' ? 'bg-indigo-100 text-indigo-800' : 
                   message.type === 'ai' ? 'bg-white text-gray-800 shadow' : 
                   'bg-red-100 text-red-800'
                 }`}>
+                  {message.type === 'ai' && (
+                    <div className="flex items-center mb-2">
+                      {message.isFromKnowledgeBase ? <Database size={16} className="text-indigo-500 mr-2" /> : <Globe size={16} className="text-green-500 mr-2" />}
+                      <span className="text-xs text-gray-500">
+                        {message.isFromKnowledgeBase ? `Knowledge Base (Relevance: ${(message.relevanceScore * 100).toFixed(2)}%)` : 'General Knowledge'}
+                      </span>
+                    </div>
+                  )}
                   <p className="whitespace-pre-wrap">{message.content}</p>
+                  {message.type === 'ai' && message.searchResults && message.searchResults.length > 0 && (
+                    <div className="mt-4">
+                      <h4 className="font-semibold text-sm text-indigo-600 mb-2">Related Information:</h4>
+                      {message.searchResults.map((result, idx) => (
+                        <div key={idx} className="bg-gray-50 p-2 rounded mb-2">
+                          <div className="flex justify-between items-start">
+                            <p className="text-sm text-gray-600 line-clamp-2">{result.content}</p>
+                            <button onClick={() => toggleResultExpansion(idx)} className="text-indigo-500 hover:text-indigo-600 ml-2">
+                              {expandedResults[idx] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                          </div>
+                          {expandedResults[idx] && (
+                            <div className="mt-2">
+                              <p className="text-xs text-gray-500">Score: {result.score.toFixed(4)}</p>
+                              {result.category && <p className="text-xs text-gray-500">Category: {result.category}</p>}
+                              {result.source && <p className="text-xs text-gray-500">Source: {result.source}</p>}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {message.type === 'ai' && (
+                    <div className="flex justify-end space-x-2 mt-2">
+                      <button className="text-green-500 hover:text-green-600"><ThumbsUp size={16} /></button>
+                      <button className="text-red-500 hover:text-red-600"><ThumbsDown size={16} /></button>
+                    </div>
+                  )}
                 </div>
-                {message.type === 'ai' && (
-                  <div className="flex justify-end space-x-2 mt-2">
-                    <button className="text-green-500 hover:text-green-600"><ThumbsUp size={20} /></button>
-                    <button className="text-red-500 hover:text-red-600"><ThumbsDown size={20} /></button>
-                  </div>
-                )}
               </div>
             ))}
           </div>
-
-          {/* Search Results */}
-          {results.length > 0 && (
-            <div className="max-w-3xl mx-auto mb-8">
-              <h2 className="text-xl font-semibold mb-4 text-indigo-700">Search Results:</h2>
-              {results.map((result, index) => (
-                <div key={index} className="bg-white rounded-lg shadow-md p-4 mb-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-lg text-indigo-600">Result {index + 1}</h3>
-                    <div className="flex space-x-2">
-                      <button className="text-gray-500 hover:text-gray-700"><Copy size={18} /></button>
-                      <button className="text-gray-500 hover:text-gray-700"><Share2 size={18} /></button>
-                      <button onClick={() => toggleResultExpansion(index)} className="text-gray-500 hover:text-gray-700">
-                        {expandedResults[index] ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                      </button>
-                    </div>
-                  </div>
-                  <p className={`text-gray-700 ${expandedResults[index] ? '' : 'line-clamp-3'}`}>{result.content}</p>
-                  <p className="text-sm text-indigo-400 mt-2">Relevance Score: {result.score.toFixed(4)}</p>
-                </div>
-              ))}
-            </div>
-          )}
         </main>
 
         {/* Search Input */}
