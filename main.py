@@ -33,7 +33,7 @@ qdrant_client = qdrant_client.QdrantClient("localhost", port=6333)
 OLLAMA_API_URL = "http://localhost:11434/api"
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Rate limiting
@@ -186,7 +186,7 @@ def get_database_keywords() -> List[str]:
 
     return list(set(all_keywords))
 
-def is_query_relevant(query: str, threshold: float = 0.1) -> Tuple[bool, float]:
+def is_query_relevant(query: str, threshold: float = 0.05) -> Tuple[bool, float]:
     keywords = get_database_keywords()
     
     texts = keywords + [query]
@@ -201,7 +201,8 @@ def is_query_relevant(query: str, threshold: float = 0.1) -> Tuple[bool, float]:
     max_similarity = np.max(similarities)
     is_relevant = max_similarity > threshold
     
-    # Convert numpy types to Python types
+    logger.debug(f"Query relevance: {is_relevant}, Score: {max_similarity}")
+    
     return bool(is_relevant), float(max_similarity)
 
 @app.post("/search")
@@ -214,7 +215,8 @@ async def search(query: Query, request: Request):
                 "search_results": [],
                 "ai_response": "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?",
                 "is_from_knowledge_base": False,
-                "relevance_score": 0.0
+                "relevance_score": 0.0,
+                "search_info": "Greeting detected, no search performed."
             }
 
         if query.text.lower() in ["what is in your knowledge base?", "what do you know?", "what information do you have?"]:
@@ -223,16 +225,16 @@ async def search(query: Query, request: Request):
                 "search_results": [],
                 "ai_response": summary,
                 "is_from_knowledge_base": True,
-                "relevance_score": 1.0
+                "relevance_score": 1.0,
+                "search_info": "Knowledge base summary requested."
             }
 
         preprocessed_query = preprocess_query(query.text)
         is_relevant, relevance_score = is_query_relevant(preprocessed_query)
 
-        # Convert numpy.bool_ to Python bool
-        is_relevant = bool(is_relevant)
-        # Convert numpy.float64 to Python float
-        relevance_score = float(relevance_score)
+        logger.info(f"Query: '{query.text}', Relevant: {is_relevant}, Score: {relevance_score}")
+
+        search_info = f"Query relevance: {relevance_score:.4f}"
 
         if is_relevant:
             expanded_queries = expand_query(preprocessed_query)
@@ -248,7 +250,7 @@ async def search(query: Query, request: Request):
             
             context = "\n\n".join([r.content for r in results])
             
-            prompt = f"""Based on the following context, answer the question. If the answer is not in the context, use your general knowledge to provide a helpful response.
+            prompt = f"""Based on the following context from the knowledge base, answer the question. If the answer is not fully addressed in the context, use the provided information along with your general knowledge to give a comprehensive response.
 
 Context:
 {context}
@@ -258,20 +260,23 @@ Question: {query.text}
 Answer:"""
             
             ai_response = query_ollama(prompt)
+            search_info += f", {len(results)} results found in knowledge base."
         else:
-            prompt = f"""You are an AI assistant for SRH Hochschule Heidelberg. Answer the following question to the best of your ability using your general knowledge. If you're not sure about specific details related to SRH Hochschule Heidelberg, inform the user that you may not have up-to-date or specific information about the university.
+            prompt = f"""You are an AI assistant for SRH Hochschule Heidelberg. The following question was deemed not directly relevant to the specific information in our knowledge base. Please answer it to the best of your ability using your general knowledge, but clarify that you're providing general information and that for specific, up-to-date details about SRH Hochschule Heidelberg, the user should consult the university's official sources.
 
 Question: {query.text}
 
 Answer:"""
             ai_response = query_ollama(prompt)
             results = []
+            search_info += ", no relevant results in knowledge base."
 
         return {
             "search_results": results,
             "ai_response": ai_response,
             "is_from_knowledge_base": is_relevant,
-            "relevance_score": relevance_score
+            "relevance_score": relevance_score,
+            "search_info": search_info
         }
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
