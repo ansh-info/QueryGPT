@@ -23,21 +23,21 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
-        <h1 className="text-4xl font-extrabold text-center text-indigo-600 mb-8">Knowledge Base Search</h1>
-        <form onSubmit={handleSearch} className="mb-8">
-          <div className="flex items-center bg-white rounded-lg shadow-md overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 py-12 px-4 sm:px-6 lg:px-8 font-sans">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-5xl font-extrabold text-center text-indigo-700 mb-12">Knowledge Base Search</h1>
+        <form onSubmit={handleSearch} className="mb-12">
+          <div className="relative flex items-center">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Enter your search query"
-              className="flex-grow px-4 py-3 focus:outline-none"
+              className="w-full px-5 py-4 pr-12 text-lg rounded-full shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-400"
             />
             <button 
               type="submit" 
-              className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 transition-colors duration-200"
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-indigo-500 hover:bg-indigo-600 text-white p-3 rounded-full transition-colors duration-200"
               disabled={isLoading}
             >
               {isLoading ? <Loader className="animate-spin" /> : <Search />}
@@ -46,20 +46,20 @@ export default function App() {
         </form>
         
         {aiResponse && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-8 transform transition-all duration-300 ease-in-out hover:scale-102">
             <h2 className="text-2xl font-bold mb-4 text-indigo-600">AI Response:</h2>
-            <p className="text-gray-700">{aiResponse}</p>
+            <p className="text-gray-700 text-lg leading-relaxed">{aiResponse}</p>
           </div>
         )}
 
         {results.length > 0 && (
           <div>
-            <h2 className="text-2xl font-bold mb-4 text-indigo-600">Search Results:</h2>
+            <h2 className="text-2xl font-bold mb-6 text-indigo-600">Search Results:</h2>
             {results.map((result, index) => (
-              <div key={index} className="bg-white rounded-lg shadow-md p-6 mb-6">
-                <h3 className="font-bold mb-2 text-lg text-indigo-500">Result {index + 1}</h3>
-                <p className="text-gray-700 mb-4">{result.content}</p>
-                <p className="text-sm text-gray-500">Relevance Score: {result.score.toFixed(4)}</p>
+              <div key={index} className="bg-indigo-50 rounded-lg shadow-md p-6 mb-6 border border-indigo-100 transform transition-all duration-300 ease-in-out hover:scale-102">
+                <h3 className="font-bold mb-3 text-xl text-indigo-500">Result {index + 1}</h3>
+                <p className="text-gray-700 mb-4 text-lg">{result.content}</p>
+                <p className="text-sm text-indigo-400">Relevance Score: {result.score.toFixed(4)}</p>
               </div>
             ))}
           </div>
