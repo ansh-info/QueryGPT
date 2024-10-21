@@ -1,45 +1,43 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Search, Loader, AlertCircle } from 'lucide-react';
+import { Search, Loader } from 'lucide-react';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [aiResponse, setAiResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
 
   const handleSearch = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    setError('');
     try {
       const response = await axios.post('http://localhost:8000/search', { text: query });
       setResults(response.data.search_results);
       setAiResponse(response.data.ai_response);
     } catch (error) {
       console.error('Error during search:', error);
-      setError('An error occurred while processing your request. Please try again.');
+      setAiResponse('An error occurred while processing your request. Please try again.');
     }
     setIsLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="container mx-auto p-4">
-        <h1 className="text-4xl font-bold mb-8 text-center text-blue-600">Knowledge Base Search</h1>
+    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-3xl mx-auto">
+        <h1 className="text-4xl font-extrabold text-center text-indigo-600 mb-8">Knowledge Base Search</h1>
         <form onSubmit={handleSearch} className="mb-8">
-          <div className="flex items-center border-b-2 border-blue-500 py-2">
+          <div className="flex items-center bg-white rounded-lg shadow-md overflow-hidden">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Enter your search query"
-              className="appearance-none bg-transparent border-none w-full text-gray-700 mr-3 py-1 px-2 leading-tight focus:outline-none"
+              className="flex-grow px-4 py-3 focus:outline-none"
             />
             <button 
               type="submit" 
-              className="flex-shrink-0 bg-blue-500 hover:bg-blue-700 border-blue-500 hover:border-blue-700 text-sm border-4 text-white py-1 px-2 rounded"
+              className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 transition-colors duration-200"
               disabled={isLoading}
             >
               {isLoading ? <Loader className="animate-spin" /> : <Search />}
@@ -47,30 +45,21 @@ export default function App() {
           </div>
         </form>
         
-        {error && (
-          <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded flex items-center">
-            <AlertCircle className="mr-2" />
-            <span>{error}</span>
-          </div>
-        )}
-
         {aiResponse && (
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-4 text-blue-600">AI Response:</h2>
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <p className="text-gray-800">{aiResponse}</p>
-            </div>
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 className="text-2xl font-bold mb-4 text-indigo-600">AI Response:</h2>
+            <p className="text-gray-700">{aiResponse}</p>
           </div>
         )}
 
         {results.length > 0 && (
           <div>
-            <h2 className="text-2xl font-bold mb-4 text-blue-600">Search Results:</h2>
+            <h2 className="text-2xl font-bold mb-4 text-indigo-600">Search Results:</h2>
             {results.map((result, index) => (
-              <div key={index} className="mb-6 bg-white p-6 rounded-lg shadow-md">
-                <h3 className="font-bold mb-2 text-lg text-blue-500">Result {index + 1}</h3>
-                <p className="whitespace-pre-wrap text-gray-700">{result.content}</p>
-                <p className="text-sm text-gray-500 mt-4">Relevance Score: {result.score.toFixed(4)}</p>
+              <div key={index} className="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h3 className="font-bold mb-2 text-lg text-indigo-500">Result {index + 1}</h3>
+                <p className="text-gray-700 mb-4">{result.content}</p>
+                <p className="text-sm text-gray-500">Relevance Score: {result.score.toFixed(4)}</p>
               </div>
             ))}
           </div>
