@@ -1,26 +1,38 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
-import { Search, X, Copy, Share2, ThumbsUp, ThumbsDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Search, X, Copy, Share2, ThumbsUp, ThumbsDown, ChevronUp, ChevronDown, Send } from 'lucide-react';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
-  const [aiResponse, setAiResponse] = useState('');
+  const [conversation, setConversation] = useState([]);
+  const [followUpQuery, setFollowUpQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [expandedResults, setExpandedResults] = useState({});
   const searchInputRef = useRef(null);
+  const followUpInputRef = useRef(null);
 
-  const handleSearch = async (e) => {
+  const handleSearch = async (e, isFollowUp = false) => {
     e.preventDefault();
     setIsLoading(true);
+    const currentQuery = isFollowUp ? followUpQuery : query;
     try {
-      const response = await axios.post('http://localhost:8000/search', { text: query });
+      const response = await axios.post('http://localhost:8000/search', { 
+        text: currentQuery,
+        conversation_history: conversation
+      });
       setResults(response.data.search_results);
-      setAiResponse(response.data.ai_response);
+      const newResponse = response.data.ai_response;
+      setConversation(prev => [...prev, { type: 'user', content: currentQuery }, { type: 'ai', content: newResponse }]);
       setExpandedResults({});
+      if (isFollowUp) {
+        setFollowUpQuery('');
+      } else {
+        setQuery('');
+      }
     } catch (error) {
       console.error('Error during search:', error);
-      setAiResponse('An error occurred while processing your request. Please try again.');
+      setConversation(prev => [...prev, { type: 'error', content: 'An error occurred while processing your request. Please try again.' }]);
     }
     setIsLoading(false);
   };
@@ -28,6 +40,11 @@ export default function App() {
   const clearSearch = () => {
     setQuery('');
     searchInputRef.current.focus();
+  };
+
+  const clearFollowUp = () => {
+    setFollowUpQuery('');
+    followUpInputRef.current.focus();
   };
 
   const toggleResultExpansion = (index) => {
@@ -53,7 +70,7 @@ export default function App() {
     <div className="min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-5xl font-extrabold text-center text-indigo-700 mb-12">Knowledge Base Search</h1>
-        <form onSubmit={handleSearch} className="mb-12">
+        <form onSubmit={(e) => handleSearch(e, false)} className="mb-12">
           <div className="relative flex items-center">
             <input
               ref={searchInputRef}
@@ -82,14 +99,50 @@ export default function App() {
           </div>
         </form>
         
-        {aiResponse && (
+        {conversation.length > 0 && (
           <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <h2 className="text-2xl font-bold mb-4 text-indigo-600">AI Response:</h2>
-            <p className="text-gray-700 text-lg leading-relaxed mb-4">{aiResponse}</p>
-            <div className="flex justify-end space-x-2">
-              <button onClick={() => provideFeedback(true)} className="text-green-500 hover:text-green-600"><ThumbsUp size={20} /></button>
-              <button onClick={() => provideFeedback(false)} className="text-red-500 hover:text-red-600"><ThumbsDown size={20} /></button>
-            </div>
+            <h2 className="text-2xl font-bold mb-4 text-indigo-600">Conversation:</h2>
+            {conversation.map((message, index) => (
+              <div key={index} className={`mb-4 ${message.type === 'user' ? 'text-right' : ''}`}>
+                <p className={`inline-block p-3 rounded-lg ${message.type === 'user' ? 'bg-indigo-100 text-indigo-800' : message.type === 'ai' ? 'bg-gray-100 text-gray-800' : 'bg-red-100 text-red-800'}`}>
+                  {message.content}
+                </p>
+                {message.type === 'ai' && (
+                  <div className="flex justify-end space-x-2 mt-2">
+                    <button onClick={() => provideFeedback(true)} className="text-green-500 hover:text-green-600"><ThumbsUp size={20} /></button>
+                    <button onClick={() => provideFeedback(false)} className="text-red-500 hover:text-red-600"><ThumbsDown size={20} /></button>
+                  </div>
+                )}
+              </div>
+            ))}
+            <form onSubmit={(e) => handleSearch(e, true)} className="mt-6">
+              <div className="relative flex items-center">
+                <input
+                  ref={followUpInputRef}
+                  type="text"
+                  value={followUpQuery}
+                  onChange={(e) => setFollowUpQuery(e.target.value)}
+                  placeholder="Ask a follow-up question"
+                  className="w-full px-5 py-3 pr-12 text-lg rounded-full shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all duration-300"
+                />
+                {followUpQuery && (
+                  <button
+                    type="button"
+                    onClick={clearFollowUp}
+                    className="absolute right-14 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={20} />
+                  </button>
+                )}
+                <button 
+                  type="submit" 
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-indigo-500 hover:bg-indigo-600 text-white p-2 rounded-full transition-colors duration-200"
+                  disabled={isLoading}
+                >
+                  {isLoading ? <div className="w-5 h-5 border-t-2 border-white border-solid rounded-full animate-spin"></div> : <Send size={20} />}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
