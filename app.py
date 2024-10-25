@@ -279,7 +279,7 @@ Answer:"""
         st.error(f"Error processing query: {str(e)}")
         return None
 
-def render_message(message):
+def render_message(message, message_index: int):
     if message["type"] == "user":
         with st.chat_message("user"):
             st.markdown(message["content"])
@@ -303,11 +303,12 @@ def render_message(message):
                                 st.markdown(f"**Source:** {result['source']}")
                             st.markdown("---")
             
-            # Feedback buttons
+            # Feedback buttons with unique keys including timestamp
+            timestamp = int(time.time() * 1000)  # millisecond timestamp
             col1, col2 = st.columns([1, 20])
             with col1:
-                st.button("👍", key=f"thumbs_up_{len(st.session_state.conversation)}")
-                st.button("👎", key=f"thumbs_down_{len(st.session_state.conversation)}")
+                st.button("👍", key=f"thumbs_up_{message_index}_{timestamp}")
+                st.button("👎", key=f"thumbs_down_{message_index}_{timestamp}")
 
 def main():
     initialize_session_state()
@@ -339,9 +340,9 @@ def main():
     # Main chat interface
     st.title("Chat Interface")
 
-    # Display conversation
-    for message in st.session_state.conversation:
-        render_message(message)
+    # Display conversation with indexed messages
+    for idx, message in enumerate(st.session_state.conversation):
+        render_message(message, idx)
 
     # Chat input
     if query := st.chat_input("Ask a question..."):
