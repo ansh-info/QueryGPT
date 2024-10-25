@@ -171,6 +171,7 @@ qtconsole
 QtPy
 referencing
 regex
+requests
 requests-oauthlib
 requests-toolbelt
 rfc3339-validator
@@ -203,6 +204,7 @@ SQLAlchemy
 srsly
 stack-data
 statsmodels
+streamlit
 tenacity
 terminado
 textblob
