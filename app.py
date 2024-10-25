@@ -10,6 +10,16 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import Counter
 import time
+import json
+from datetime import datetime
+
+# Page configuration
+st.set_page_config(
+    page_title="Knowledge Base Search",
+    page_icon="🔍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -23,7 +33,41 @@ def init_qdrant():
 # Initialize Ollama API endpoint
 OLLAMA_API_URL = "http://localhost:11434/api"
 
-# Cache for embeddings
+# Rate limiting
+RATE_LIMIT = 10
+RATE_LIMIT_DURATION = 60
+
+# Session state initialization
+def initialize_session_state():
+    if 'conversation' not in st.session_state:
+        st.session_state.conversation = []
+    if 'chats' not in st.session_state:
+        st.session_state.chats = []
+    if 'current_chat_id' not in st.session_state:
+        st.session_state.current_chat_id = None
+    if 'request_history' not in st.session_state:
+        st.session_state.request_history = {}
+    if 'expanded_results' not in st.session_state:
+        st.session_state.expanded_results = {}
+
+def rate_limit_check():
+    client = "streamlit_user"  # Using a default client ID for Streamlit
+    current_time = time.time()
+    
+    if client in st.session_state.request_history:
+        request_times = st.session_state.request_history[client]
+        request_times = [t for t in request_times if current_time - t < RATE_LIMIT_DURATION]
+        
+        if len(request_times) >= RATE_LIMIT:
+            st.error("Rate limit exceeded. Please wait before making more requests.")
+            return False
+    else:
+        request_times = []
+    
+    request_times.append(current_time)
+    st.session_state.request_history[client] = request_times
+    return True
+
 @st.cache_data(ttl=3600)
 def encode_text(text: str):
     try:
@@ -40,22 +84,14 @@ def encode_text(text: str):
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-@st.cache_data(ttl=3600)
-def query_ollama(prompt: str):
-    try:
-        response = requests.post(
-            f"{OLLAMA_API_URL}/generate",
-            json={
-                "model": "llama3.2",
-                "prompt": prompt,
-                "stream": False
-            }
-        )
-        response.raise_for_status()
-        return response.json()['response']
-    except requests.RequestException as e:
-        st.error(f"Error generating response: {str(e)}")
-        return None
+def preprocess_query(query: str) -> str:
+    return query.lower().strip()
+
+def expand_query(query: str) -> List[str]:
+    expanded = [query]
+    if "srh" in query:
+        expanded.append(query.replace("srh", "srh hochschule heidelberg"))
+    return expanded
 
 def search_qdrant(client, query: str, filters: Optional[dict] = None, limit: int = 5):
     query_vector = encode_text(query)
@@ -87,6 +123,22 @@ def search_qdrant(client, query: str, filters: Optional[dict] = None, limit: int
         return []
 
 @st.cache_data(ttl=3600)
+def query_ollama(prompt: str):
+    try:
+        response = requests.post(
+            f"{OLLAMA_API_URL}/generate",
+            json={
+                "model": "llama3.2",
+                "prompt": prompt,
+                "stream": False
+            }
+        )
+        response.raise_for_status()
+        return response.json()['response']
+    except requests.RequestException as e:
+        st.error(f"Error generating response: {str(e)}")
+        return None
+
 def get_knowledge_base_summary(client):
     try:
         entries = client.scroll(
@@ -116,19 +168,6 @@ def get_knowledge_base_summary(client):
         st.error(f"Error generating knowledge base summary: {str(e)}")
         return "Unable to generate knowledge base summary at the moment."
 
-def get_database_keywords(client) -> List[str]:
-    entries = client.scroll(
-        collection_name="knowledge_base",
-        limit=1000
-    )[0]
-
-    all_keywords = []
-    for entry in entries:
-        keywords = entry.payload.get('keywords', [])
-        all_keywords.extend(keywords)
-
-    return list(set(all_keywords))
-
 def is_query_relevant(client, query: str, threshold: float = 0.05) -> Tuple[bool, float]:
     keywords = get_database_keywords(client)
     texts = keywords + [query]
@@ -145,85 +184,59 @@ def is_query_relevant(client, query: str, threshold: float = 0.05) -> Tuple[bool
     
     return bool(is_relevant), float(max_similarity)
 
-def initialize_session_state():
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-    if 'current_chat' not in st.session_state:
-        st.session_state.current_chat = None
+def get_database_keywords(client) -> List[str]:
+    entries = client.scroll(
+        collection_name="knowledge_base",
+        limit=1000
+    )[0]
 
-def main():
-    st.set_page_config(
-        page_title="Knowledge Base Search",
-        page_icon="🔍",
-        layout="wide"
-    )
+    all_keywords = []
+    for entry in entries:
+        keywords = entry.payload.get('keywords', [])
+        all_keywords.extend(keywords)
 
-    initialize_session_state()
-    qdrant = init_qdrant()
+    return list(set(all_keywords))
 
-    # Sidebar
-    with st.sidebar:
-        st.title("Knowledge Base Search")
-        st.markdown("---")
-        
-        if st.button("New Chat", key="new_chat"):
-            st.session_state.messages = []
-            st.session_state.current_chat = time.time()
-        
-        st.markdown("---")
-        if st.button("Show Knowledge Base Summary"):
-            summary = get_knowledge_base_summary(qdrant)
-            st.info(summary)
+def process_query(query: str, client):
+    if not rate_limit_check():
+        return
 
-    # Main chat interface
-    st.title("Chat Interface")
-
-    # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            if "search_results" in message and message["search_results"]:
-                with st.expander("Related Information"):
-                    for result in message["search_results"]:
-                        st.markdown(f"**Content:** {result['content']}")
-                        st.markdown(f"**Score:** {result['score']:.4f}")
-                        if result.get('category'):
-                            st.markdown(f"**Category:** {result['category']}")
-                        if result.get('source'):
-                            st.markdown(f"**Source:** {result['source']}")
-                        st.markdown("---")
-
-    # Chat input
-    if prompt := st.chat_input("Ask a question..."):
-        # Add user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
+    try:
         # Handle greetings
-        if prompt.lower() in ["hi", "hello", "hey"]:
-            response = "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?"
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response
-            })
-            return
+        if query.lower() in ["hi", "hello", "hey"]:
+            return {
+                "type": "ai",
+                "content": "Hello! How can I assist you with information about SRH Hochschule Heidelberg today?",
+                "is_from_knowledge_base": False,
+                "relevance_score": 0.0,
+                "search_results": [],
+                "search_info": "Greeting detected"
+            }
 
-        # Handle knowledge base inquiry
-        if prompt.lower() in ["what is in your knowledge base?", "what do you know?", "what information do you have?"]:
-            response = get_knowledge_base_summary(qdrant)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response
-            })
-            return
+        # Handle knowledge base inquiries
+        if query.lower() in ["what is in your knowledge base?", "what do you know?", "what information do you have?"]:
+            summary = get_knowledge_base_summary(client)
+            return {
+                "type": "ai",
+                "content": summary,
+                "is_from_knowledge_base": True,
+                "relevance_score": 1.0,
+                "search_results": [],
+                "search_info": "Knowledge base summary"
+            }
 
-        # Process regular query
-        is_relevant, relevance_score = is_query_relevant(qdrant, prompt)
-        
+        preprocessed_query = preprocess_query(query)
+        is_relevant, relevance_score = is_query_relevant(client, preprocessed_query)
+
         if is_relevant:
-            search_results = search_qdrant(qdrant, prompt)
-            results = []
+            expanded_queries = expand_query(preprocessed_query)
+            all_results = []
+            for expanded_query in expanded_queries:
+                search_results = search_qdrant(client, expanded_query)
+                all_results.extend(search_results)
             
-            for result in search_results:
+            results = []
+            for result in all_results[:5]:
                 results.append({
                     "content": result.payload.get('original_content', ''),
                     "score": result.score,
@@ -233,33 +246,129 @@ def main():
 
             context = "\n\n".join([r["content"] for r in results])
             
-            prompt_template = f"""Based on the following context from the knowledge base, answer the question:
+            prompt = f"""Based on the following context from the knowledge base, answer the question:
 
 Context:
 {context}
 
-Question: {prompt}
+Question: {query}
 
 Answer:"""
             
-            ai_response = query_ollama(prompt_template)
+            ai_response = query_ollama(prompt)
         else:
-            prompt_template = f"""You are an AI assistant for SRH Hochschule Heidelberg. Please answer this question using your general knowledge:
+            prompt = f"""You are an AI assistant for SRH Hochschule Heidelberg. Please answer this question using your general knowledge:
 
-Question: {prompt}
+Question: {query}
 
 Answer:"""
             
-            ai_response = query_ollama(prompt_template)
+            ai_response = query_ollama(prompt)
             results = []
 
-        st.session_state.messages.append({
-            "role": "assistant",
+        return {
+            "type": "ai",
             "content": ai_response,
-            "search_results": results,
             "is_from_knowledge_base": is_relevant,
-            "relevance_score": relevance_score
-        })
+            "relevance_score": relevance_score,
+            "search_results": results,
+            "search_info": f"Relevance: {relevance_score:.4f}"
+        }
+
+    except Exception as e:
+        st.error(f"Error processing query: {str(e)}")
+        return None
+
+def render_message(message):
+    if message["type"] == "user":
+        with st.chat_message("user"):
+            st.markdown(message["content"])
+    elif message["type"] == "ai":
+        with st.chat_message("assistant"):
+            st.markdown(message["content"])
+            
+            # Show source information
+            if message.get("is_from_knowledge_base"):
+                st.info(f"Source: Knowledge Base (Relevance: {message['relevance_score']*100:.2f}%)")
+                
+                # Display search results in an expander
+                if message.get("search_results"):
+                    with st.expander("View Related Information"):
+                        for idx, result in enumerate(message["search_results"]):
+                            st.markdown(f"**Content:** {result['content']}")
+                            st.markdown(f"**Score:** {result['score']:.4f}")
+                            if result.get('category'):
+                                st.markdown(f"**Category:** {result['category']}")
+                            if result.get('source'):
+                                st.markdown(f"**Source:** {result['source']}")
+                            st.markdown("---")
+            
+            # Feedback buttons
+            col1, col2 = st.columns([1, 20])
+            with col1:
+                st.button("👍", key=f"thumbs_up_{len(st.session_state.conversation)}")
+                st.button("👎", key=f"thumbs_down_{len(st.session_state.conversation)}")
+
+def main():
+    initialize_session_state()
+    client = init_qdrant()
+
+    # Sidebar
+    with st.sidebar:
+        st.title("Knowledge Base Search")
+        
+        if st.button("New Chat"):
+            st.session_state.conversation = []
+            st.session_state.current_chat_id = time.time()
+            st.rerun()
+        
+        st.markdown("---")
+        
+        if st.button("Show Knowledge Base Summary"):
+            summary = get_knowledge_base_summary(client)
+            st.info(summary)
+        
+        # Chat history
+        st.markdown("### Chat History")
+        for chat in st.session_state.chats:
+            if st.button(f"Chat {chat['id']}", key=f"chat_{chat['id']}"):
+                st.session_state.current_chat_id = chat['id']
+                st.session_state.conversation = chat.get('messages', [])
+                st.rerun()
+
+    # Main chat interface
+    st.title("Chat Interface")
+
+    # Display conversation
+    for message in st.session_state.conversation:
+        render_message(message)
+
+    # Chat input
+    if query := st.chat_input("Ask a question..."):
+        # Add user message
+        user_message = {"type": "user", "content": query}
+        st.session_state.conversation.append(user_message)
+        
+        # Process query and add AI response
+        ai_response = process_query(query, client)
+        if ai_response:
+            st.session_state.conversation.append(ai_response)
+            
+            # Update chat history
+            if st.session_state.current_chat_id:
+                chat_exists = False
+                for chat in st.session_state.chats:
+                    if chat['id'] == st.session_state.current_chat_id:
+                        chat['messages'] = st.session_state.conversation
+                        chat_exists = True
+                        break
+                if not chat_exists:
+                    st.session_state.chats.append({
+                        'id': st.session_state.current_chat_id,
+                        'messages': st.session_state.conversation
+                    })
+        
+        st.rerun()
 
 if __name__ == "__main__":
     main()
