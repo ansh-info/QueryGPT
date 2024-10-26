@@ -18,6 +18,7 @@ bleach
 blis
 boto3
 botocore
+bcrypt
 cachetools
 catalogue
 cffi
