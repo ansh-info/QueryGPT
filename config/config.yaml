@@ -1,0 +1,33 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      name: Admin User
+      password: admin123  # In production, use hashed passwords
+    user:
+      email: user@example.com
+      name: Regular User
+      password: user123
+
+settings:
+  QDRANT_HOST: "localhost"
+  QDRANT_PORT: 6333
+  OLLAMA_API_URL: "http://localhost:11434/api"
+  CACHE_TTL: 3600
+  CACHE_MAXSIZE: 1000
+  RATE_LIMIT: 10
+  RATE_LIMIT_DURATION: 60
+
+logging:
+  version: 1
+  formatters:
+    standard:
+      format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  handlers:
+    file:
+      class: logging.FileHandler
+      filename: logs/app.log
+      formatter: standard
+  root:
+    level: INFO
+    handlers: [file]
