@@ -15,7 +15,7 @@ from core.cache import CacheManager
 from services.qdrant_service import QdrantService
 from services.ollama_service import OllamaService
 from services.query_service import QueryProcessor
-from utils.analytics import AnalyticsManager, SessionManager
+from utils.analysis import FeedbackAnalyzer
 
 # Setup logging
 logging.basicConfig(
@@ -30,8 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize global services
 cache_manager = CacheManager()
-analytics_manager = AnalyticsManager()
-session_manager = SessionManager()
+feedback_analyzer = FeedbackAnalyzer()
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -43,8 +42,6 @@ def initialize_session_state():
         st.session_state.current_chat_id = None
     if 'expanded_results' not in st.session_state:
         st.session_state.expanded_results = {}
-    if 'session_id' not in st.session_state:
-        st.session_state.session_id = None
 
 def render_message(message, message_index: int):
     """Render a single message in the chat interface"""
@@ -86,31 +83,18 @@ def render_message(message, message_index: int):
             col1, col2 = st.columns([1, 20])
             with col1:
                 if st.button("👍", key=f"thumbs_up_{message_index}_{timestamp}"):
-                    analytics_manager.track_feedback(
-                        query=message.get("query", ""),
-                        response=message["content"],
-                        feedback_type="positive",
-                        user_id=st.session_state.get("username")
+                    feedback_analyzer.store_feedback(
+                        message["content"],
+                        "positive",
+                        datetime.now()
                     )
-                    if st.session_state.session_id:
-                        session_manager.add_feedback_to_session(
-                            st.session_state.session_id, 
-                            "positive"
-                        )
                     st.success("Thank you for your feedback!")
-
                 if st.button("👎", key=f"thumbs_down_{message_index}_{timestamp}"):
-                    analytics_manager.track_feedback(
-                        query=message.get("query", ""),
-                        response=message["content"],
-                        feedback_type="negative",
-                        user_id=st.session_state.get("username")
+                    feedback_analyzer.store_feedback(
+                        message["content"],
+                        "negative",
+                        datetime.now()
                     )
-                    if st.session_state.session_id:
-                        session_manager.add_feedback_to_session(
-                            st.session_state.session_id, 
-                            "negative"
-                        )
                     st.error("Thank you for your feedback!")
 
 def format_chat_title(chat):
@@ -121,37 +105,6 @@ def format_chat_title(chat):
     else:
         title = f"Chat {chat['id']}"
     return title
-
-def show_analytics():
-    """Display analytics dashboard"""
-    analytics = analytics_manager.get_analytics()
-    session_stats = session_manager.get_session_stats()
-
-    st.markdown("### System Analytics")
-    
-    # Key Metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Queries", analytics['query_stats'].get('total_queries', 0))
-        st.metric("Unique Queries", analytics['query_stats'].get('unique_queries', 0))
-    with col2:
-        st.metric("Satisfaction Rate", f"{analytics['feedback_stats'].get('satisfaction_rate', 0):.2%}")
-        st.metric("Total Feedback", analytics['feedback_stats'].get('total_feedback', 0))
-    with col3:
-        st.metric("Active Sessions", session_stats['active_sessions'])
-        st.metric("Avg Session Duration", f"{session_stats.get('average_session_duration', 0)/60:.1f} min")
-
-    # Popular Queries
-    if analytics['query_stats'].get('popular_queries'):
-        st.markdown("### Popular Queries")
-        for query, count in analytics['query_stats']['popular_queries']:
-            st.markdown(f"- {query} ({count} times)")
-
-    # Recent Feedback
-    if analytics['feedback_stats'].get('recent_feedback'):
-        st.markdown("### Recent Feedback")
-        for feedback in analytics['feedback_stats']['recent_feedback']:
-            st.markdown(f"- {feedback['feedback_type']} ({feedback['timestamp'].strftime('%Y-%m-%d %H:%M')})")
 
 def main():
     st.set_page_config(
@@ -167,10 +120,6 @@ def main():
     # Get user info
     username = get_username()
     user_info = get_user_info()
-
-    # Initialize session if needed
-    if not st.session_state.session_id:
-        st.session_state.session_id = session_manager.create_session(username)
 
     initialize_session_state()
 
@@ -190,8 +139,6 @@ def main():
             st.title(f"Welcome, {user_info['name']}")
         with col2:
             if st.button("Logout"):
-                if st.session_state.session_id:
-                    session_manager.end_session(st.session_state.session_id)
                 logout()
                 st.rerun()
         
@@ -220,7 +167,19 @@ def main():
 
         # Analytics section
         if st.checkbox("Show Analytics", key="show_analytics"):
-            show_analytics()
+            st.markdown("### Analytics")
+            feedback_stats = feedback_analyzer.get_stats()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Feedback", feedback_stats.get('total_feedback', 0))
+            with col2:
+                st.metric("Satisfaction Rate", f"{feedback_stats.get('satisfaction_rate', 0):.2%}")
+            
+            if feedback_stats.get('recent_feedback'):
+                st.markdown("### Recent Feedback")
+                for feedback in feedback_stats['recent_feedback']:
+                    st.markdown(f"- {feedback['feedback']} ({feedback['timestamp'].strftime('%Y-%m-%d %H:%M')})")
 
     # Main chat interface
     st.title("Chat Interface")
@@ -231,12 +190,6 @@ def main():
 
     # Chat input
     if query := st.chat_input("Ask a question..."):
-        # Track query
-        analytics_manager.track_query(
-            query=query,
-            user_id=username
-        )
-        
         # Check cache
         cached_response = cache_manager.get_cached_response(query)
         
@@ -253,14 +206,6 @@ def main():
                         ollama_service
                     )
                     cache_manager.cache_response(query, response)
-                    
-                    # Track search results
-                    if response.get('search_results'):
-                        analytics_manager.track_search_result(
-                            query=query,
-                            results=response['search_results'],
-                            user_id=username
-                        )
                 except Exception as e:
                     logger.error(f"Error processing query: {str(e)}")
                     response = {
@@ -273,14 +218,6 @@ def main():
             {"type": "user", "content": query},
             response
         ])
-
-        # Add query to session
-        if st.session_state.session_id:
-            session_manager.add_query_to_session(
-                st.session_state.session_id,
-                query,
-                response['content']
-            )
 
         # Update chat history
         if st.session_state.current_chat_id:
