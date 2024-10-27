@@ -1,5 +1,5 @@
 import streamlit as st
-from auth.authenticator import setup_auth, get_username, logout
+from auth.authenticator import setup_auth, get_username, get_user_info, logout
 from core.logging import setup_logging
 from core.cache import CacheManager
 from services.qdrant_service import QdrantService
@@ -121,9 +121,13 @@ def main():
         layout="wide"
     )
 
-    # Authentication check
+    # Add authentication check
     if not setup_auth():
-        return
+        st.stop()  # Stop execution if not authenticated
+    
+    # Get user info
+    username = get_username()
+    user_info = get_user_info()
 
     initialize_session_state()
 
@@ -136,16 +140,17 @@ def main():
         st.error(f"Error initializing services: {str(e)}")
         return
 
-    # Sidebar
+    # Modify your sidebar to include user info
     with st.sidebar:
+        # Add user info and logout at the top of sidebar
         col1, col2 = st.columns([3, 1])
         with col1:
-            st.title("Knowledge Base")
+            st.write(f"Welcome, {user_info['name']}")
         with col2:
             if st.button("Logout"):
                 logout()
                 st.rerun()
-        
+
         if st.button("New Chat", key="new_chat"):
             st.session_state.conversation = []
             st.session_state.current_chat_id = time.time()
