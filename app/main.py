@@ -8,6 +8,32 @@ from services.query_service import QueryProcessor
 from utils.analysis import FeedbackAnalyzer
 import time
 from datetime import datetime
+import os
+import sys
+import logging
+
+# Add the app directory to the Python path
+app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if app_dir not in sys.path:
+    sys.path.append(app_dir)
+
+from app.auth.authenticator import setup_auth, get_username, logout
+from app.core.cache import CacheManager
+from app.services.qdrant_service import QdrantService
+from app.services.ollama_service import OllamaService
+from app.services.query_service import QueryProcessor
+from app.utils.analysis import FeedbackAnalyzer
+
+# Setup basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join('logs', f'app_{datetime.now().strftime("%Y%m%d")}.log')),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Setup and configuration
 logger = setup_logging()
