@@ -1,7 +1,7 @@
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from typing import List, Optional, Dict, Any
-from collections import Counter
+from typing import List, Optional, Dict, Any, Tuple
+from collections import Counter, defaultdict
 import logging
 from datetime import datetime
 import numpy as np
@@ -88,7 +88,6 @@ class QdrantService:
                     if key not in ['category', 'keywords', 'source', 'timestamp']:
                         metadata_analysis[key][str(value)] += 1
 
-            # Calculate statistics
             stats = {
                 'total_entries': total_entries,
                 'categories': {
@@ -118,7 +117,6 @@ class QdrantService:
                 }
             }
 
-            # Generate readable summary
             summary_text = (
                 f"Knowledge base contains {total_entries} entries covering {len(categories)} "
                 f"categories and {len(topics)} unique topics. "
@@ -185,7 +183,6 @@ class QdrantService:
     def get_similar_entries(self, entry_id: str, limit: int = 5) -> List[Dict]:
         """Get similar entries to a given entry"""
         try:
-            # Get the vector of the target entry
             entry = self.client.retrieve(
                 collection_name=self.collection_name,
                 ids=[entry_id]
@@ -194,14 +191,12 @@ class QdrantService:
             if not entry:
                 return []
             
-            # Search for similar entries
             similar = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=entry[0].vector,
-                limit=limit + 1  # +1 to exclude the entry itself
+                limit=limit + 1
             )
             
-            # Remove the original entry and format results
             return [
                 {
                     'content': r.payload.get('original_content', ''),
@@ -215,6 +210,42 @@ class QdrantService:
         except Exception as e:
             logger.error(f"Error getting similar entries: {str(e)}")
             return []
+
+    def delete_entry(self, entry_id: str) -> bool:
+        """Delete an entry from the knowledge base"""
+        try:
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.PointIdsList(
+                    points=[entry_id]
+                )
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting entry: {str(e)}")
+            return False
+
+    def update_entry(self, entry_id: str, content: str, embedding: List[float], metadata: Dict[str, Any]) -> bool:
+        """Update an existing entry"""
+        try:
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=[
+                    models.PointStruct(
+                        id=entry_id,
+                        vector=embedding,
+                        payload={
+                            'original_content': content,
+                            **metadata,
+                            'updated_at': datetime.now().isoformat()
+                        }
+                    )
+                ]
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error updating entry: {str(e)}")
+            return False
 
     def health_check(self) -> Dict[str, Any]:
         """Check the health of the Qdrant service"""
@@ -240,3 +271,50 @@ class QdrantService:
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
             }
+
+    def get_collection_stats(self) -> Dict[str, Any]:
+        """Get detailed statistics about the collection"""
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+            return {
+                'points_count': collection_info.points_count,
+                'vectors_config': collection_info.config.params,
+                'optimization': collection_info.optimization_config,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting collection stats: {str(e)}")
+            return {}
+
+    def clear_cache(self) -> bool:
+        """Clear the collection's optimization cache"""
+        try:
+            self.client.update_collection(
+                collection_name=self.collection_name,
+                optimizer_config=models.OptimizersConfigDiff(
+                    flush_interval_sec=1
+                )
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing cache: {str(e)}")
+            return False
+
+    def get_entry(self, entry_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific entry by ID"""
+        try:
+            results = self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=[entry_id]
+            )
+            if results:
+                return {
+                    'content': results[0].payload.get('original_content', ''),
+                    'metadata': {k: v for k, v in results[0].payload.items() 
+                               if k != 'original_content'},
+                    'vector': results[0].vector
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error retrieving entry: {str(e)}")
+            return None
