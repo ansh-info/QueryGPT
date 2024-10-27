@@ -10,6 +10,7 @@ class FeedbackAnalyzer:
         self.feedback_data = []
     
     def store_feedback(self, response: str, feedback_type: str, timestamp: datetime):
+        """Store user feedback"""
         self.feedback_data.append({
             'response': response,
             'feedback': feedback_type,
@@ -17,6 +18,7 @@ class FeedbackAnalyzer:
         })
     
     def analyze_feedback(self) -> Dict[str, Any]:
+        """Analyze feedback patterns"""
         try:
             if not self.feedback_data:
                 return {
@@ -64,3 +66,8 @@ class FeedbackAnalyzer:
         except Exception as e:
             logger.error(f"Error getting feedback stats: {str(e)}")
             return {}
+
+    def clear_feedback(self):
+        """Clear all feedback data"""
+        self.feedback_data = []
+        logger.info("Feedback data cleared")
