@@ -39,10 +39,11 @@ def initialize_session_state():
         'chats': [],
         'current_chat_id': None,
         'expanded_results': {},
-        'theme': 'light',
+        'theme': 'Light',
         'show_timestamps': True,
         'show_sources': True,
-        'chat_expanded': True
+        'chat_expanded': True,
+        'auto_scroll': True
     }
     
     for key, default_value in defaults.items():
@@ -96,6 +97,44 @@ def manage_chat_history():
                         st.session_state.current_chat_id = None
                         st.session_state.conversation = []
                     st.rerun()
+
+def render_settings():
+    """Render settings section in sidebar"""
+    with st.expander("Settings"):
+        # Theme settings
+        theme_options = ['Light', 'Dark']
+        current_theme = st.session_state.get('theme', 'Light')
+        try:
+            theme_index = theme_options.index(current_theme.title())
+        except ValueError:
+            theme_index = 0
+            
+        selected_theme = st.radio(
+            "Theme",
+            options=theme_options,
+            index=theme_index,
+            key='theme_setting'
+        )
+        st.session_state.theme = selected_theme
+
+        # Display settings
+        st.checkbox(
+            "Show Timestamps",
+            value=st.session_state.get('show_timestamps', True),
+            key='show_timestamps'
+        )
+        st.checkbox(
+            "Show Sources",
+            value=st.session_state.get('show_sources', True),
+            key='show_sources'
+        )
+
+        # Chat settings
+        st.checkbox(
+            "Auto-scroll Chat",
+            value=st.session_state.get('auto_scroll', True),
+            key='auto_scroll'
+        )
 
 def render_message(message, message_index: int):
     """Render a single message in the chat interface"""
@@ -224,15 +263,8 @@ def main():
                 logout()
                 st.rerun()
         
-        # Settings
-        with st.expander("Settings"):
-            st.selectbox(
-                "Theme",
-                ['Light', 'Dark'],
-                key='theme'
-            )
-            st.checkbox("Show Timestamps", key='show_timestamps')
-            st.checkbox("Show Sources", key='show_sources')
+        # Settings section
+        render_settings()
         
         # New Chat button
         if st.button("New Chat", key="new_chat"):
