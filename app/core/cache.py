@@ -7,13 +7,13 @@ logger = logging.getLogger(__name__)
 
 class CacheManager:
     def __init__(self):
-        # Cache for query responses
-        self.response_cache = TTLCache(maxsize=1000, ttl=3600)  # 1 hour TTL
+        # Cache for query responses (1 hour TTL)
+        self.response_cache = TTLCache(maxsize=1000, ttl=3600)
         # Cache for embeddings
         self.embedding_cache = LRUCache(maxsize=10000)
-        # Cache for knowledge base summary
-        self.summary_cache = TTLCache(maxsize=1, ttl=300)  # 5 minutes TTL
-        # Cache hits/misses tracking
+        # Cache for knowledge base summary (5 minutes TTL)
+        self.summary_cache = TTLCache(maxsize=1, ttl=300)
+        # Cache stats
         self.stats = {
             'hits': 0,
             'misses': 0,
@@ -25,14 +25,17 @@ class CacheManager:
         cached = self.response_cache.get(query)
         if cached:
             self.stats['hits'] += 1
+            logger.debug(f"Cache hit for query: {query}")
             return cached
         self.stats['misses'] += 1
+        logger.debug(f"Cache miss for query: {query}")
         return None
 
     def cache_response(self, query: str, response: Dict[str, Any]):
         """Cache a query response"""
         try:
             self.response_cache[query] = response
+            logger.debug(f"Cached response for query: {query}")
         except Exception as e:
             logger.error(f"Error caching response: {str(e)}")
 
@@ -60,12 +63,13 @@ class CacheManager:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
+        total = self.stats['hits'] + self.stats['misses']
         return {
             'response_cache_size': len(self.response_cache),
             'embedding_cache_size': len(self.embedding_cache),
             'hits': self.stats['hits'],
             'misses': self.stats['misses'],
-            'hit_rate': self.stats['hits'] / (self.stats['hits'] + self.stats['misses']) if (self.stats['hits'] + self.stats['misses']) > 0 else 0,
+            'hit_rate': self.stats['hits'] / total if total > 0 else 0,
             'uptime': (datetime.now() - self.stats['start_time']).total_seconds()
         }
 
