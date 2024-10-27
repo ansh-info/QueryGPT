@@ -3,20 +3,21 @@ credentials:
     admin:
       email: admin@example.com
       name: Admin User
-      password: $2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewBxz1Kp/8Kj.IVm  # Hash for 'admin123'
+      password: $2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewBxz1Kp/8Kj.IVm
+      role: admin
+      created_at: '2024-01-01T00:00:00'
+    ansh:
+      created_at: '2024-10-25T15:05:54.305576'
+      email: ansh@gmail.com
+      name: ansh
+      password: $2b$12$tdKJpZqEyKlJ1HF6BdQ6M.023ZdVi1Twt9vKEJFurxUmr19L6oAIS
+      role: user
     user:
       email: user@example.com
       name: Regular User
       password: user123
-
-settings:
-  QDRANT_HOST: "localhost"
-  QDRANT_PORT: 6333
-  OLLAMA_API_URL: "http://localhost:11434/api"
-  CACHE_TTL: 3600
-  CACHE_MAXSIZE: 1000
-  RATE_LIMIT: 10
-  RATE_LIMIT_DURATION: 60
+      role: user
+      created_at: '2024-01-01T00:00:00'
 
 logging:
   version: 1
@@ -30,4 +31,54 @@ logging:
       formatter: standard
   root:
     level: INFO
-    handlers: [file]
+    handlers:
+      - file
+
+settings:
+  # Service Settings
+  QDRANT_HOST: localhost
+  QDRANT_PORT: 6333
+  OLLAMA_API_URL: http://localhost:11434/api
+  
+  # Cache Settings
+  CACHE_TTL: 3600
+  CACHE_MAXSIZE: 1000
+  
+  # Rate Limiting
+  RATE_LIMIT: 10
+  RATE_LIMIT_DURATION: 60
+
+  # Authentication Settings
+  password_min_length: 8
+  require_email_verification: false
+  max_login_attempts: 5
+  lockout_duration: 15  # minutes
+  token_expiry_days: 30
+  password_reset_expiry: 24  # hours
+
+auth:
+  cookie:
+    name: auth_token
+    expiry_days: 30
+    key: your_secret_key_here  # Change this in production
+  jwt:
+    secret_key: your_jwt_secret_key_here  # Change this in production
+    algorithm: HS256
+  security:
+    password_reset_enabled: true
+    two_factor_auth_enabled: false
+    session_timeout: 3600  # seconds
+    failed_login_delay: 3  # seconds
+    minimum_password_length: 8
+    require_special_characters: true
+    password_history_size: 3  # number of previous passwords to remember
+
+# Email Settings (for password reset, etc.)
+email:
+  enabled: false  # Set to true if you want to enable email features
+  smtp_server: smtp.gmail.com
+  smtp_port: 587
+  smtp_username: your_email@gmail.com
+  smtp_password: your_app_password
+  from_address: your_email@gmail.com
+  use_tls: true
