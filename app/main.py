@@ -1,30 +1,23 @@
 import streamlit as st
-from auth.authenticator import setup_auth, get_username, get_user_info, logout
-from core.logging import setup_logging
-from core.cache import CacheManager
-from services.qdrant_service import QdrantService
-from services.ollama_service import OllamaService
-from services.query_service import QueryProcessor
-from utils.analysis import FeedbackAnalyzer
-import time
-from datetime import datetime
 import os
 import sys
 import logging
+from datetime import datetime
+import time
 
 # Add the app directory to the Python path
 app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if app_dir not in sys.path:
     sys.path.append(app_dir)
 
-from app.auth.authenticator import setup_auth, get_username, logout
-from app.core.cache import CacheManager
-from app.services.qdrant_service import QdrantService
-from app.services.ollama_service import OllamaService
-from app.services.query_service import QueryProcessor
-from app.utils.analysis import FeedbackAnalyzer
+from auth.authenticator import setup_auth, get_username, get_user_info, logout
+from core.cache import CacheManager
+from services.qdrant_service import QdrantService
+from services.ollama_service import OllamaService
+from services.query_service import QueryProcessor
+from utils.analytics import AnalyticsManager, SessionManager
 
-# Setup basic logging
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -35,10 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Setup and configuration
-logger = setup_logging()
+# Initialize global services
 cache_manager = CacheManager()
-feedback_analyzer = FeedbackAnalyzer()  # Move to global scope for access in render_message
+analytics_manager = AnalyticsManager()
+session_manager = SessionManager()
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -50,6 +43,8 @@ def initialize_session_state():
         st.session_state.current_chat_id = None
     if 'expanded_results' not in st.session_state:
         st.session_state.expanded_results = {}
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = None
 
 def render_message(message, message_index: int):
     """Render a single message in the chat interface"""
@@ -91,18 +86,31 @@ def render_message(message, message_index: int):
             col1, col2 = st.columns([1, 20])
             with col1:
                 if st.button("👍", key=f"thumbs_up_{message_index}_{timestamp}"):
-                    feedback_analyzer.store_feedback(
-                        message["content"], 
-                        "positive",
-                        datetime.now()
+                    analytics_manager.track_feedback(
+                        query=message.get("query", ""),
+                        response=message["content"],
+                        feedback_type="positive",
+                        user_id=st.session_state.get("username")
                     )
+                    if st.session_state.session_id:
+                        session_manager.add_feedback_to_session(
+                            st.session_state.session_id, 
+                            "positive"
+                        )
                     st.success("Thank you for your feedback!")
+
                 if st.button("👎", key=f"thumbs_down_{message_index}_{timestamp}"):
-                    feedback_analyzer.store_feedback(
-                        message["content"], 
-                        "negative",
-                        datetime.now()
+                    analytics_manager.track_feedback(
+                        query=message.get("query", ""),
+                        response=message["content"],
+                        feedback_type="negative",
+                        user_id=st.session_state.get("username")
                     )
+                    if st.session_state.session_id:
+                        session_manager.add_feedback_to_session(
+                            st.session_state.session_id, 
+                            "negative"
+                        )
                     st.error("Thank you for your feedback!")
 
 def format_chat_title(chat):
@@ -114,6 +122,37 @@ def format_chat_title(chat):
         title = f"Chat {chat['id']}"
     return title
 
+def show_analytics():
+    """Display analytics dashboard"""
+    analytics = analytics_manager.get_analytics()
+    session_stats = session_manager.get_session_stats()
+
+    st.markdown("### System Analytics")
+    
+    # Key Metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Queries", analytics['query_stats'].get('total_queries', 0))
+        st.metric("Unique Queries", analytics['query_stats'].get('unique_queries', 0))
+    with col2:
+        st.metric("Satisfaction Rate", f"{analytics['feedback_stats'].get('satisfaction_rate', 0):.2%}")
+        st.metric("Total Feedback", analytics['feedback_stats'].get('total_feedback', 0))
+    with col3:
+        st.metric("Active Sessions", session_stats['active_sessions'])
+        st.metric("Avg Session Duration", f"{session_stats.get('average_session_duration', 0)/60:.1f} min")
+
+    # Popular Queries
+    if analytics['query_stats'].get('popular_queries'):
+        st.markdown("### Popular Queries")
+        for query, count in analytics['query_stats']['popular_queries']:
+            st.markdown(f"- {query} ({count} times)")
+
+    # Recent Feedback
+    if analytics['feedback_stats'].get('recent_feedback'):
+        st.markdown("### Recent Feedback")
+        for feedback in analytics['feedback_stats']['recent_feedback']:
+            st.markdown(f"- {feedback['feedback_type']} ({feedback['timestamp'].strftime('%Y-%m-%d %H:%M')})")
+
 def main():
     st.set_page_config(
         page_title="Knowledge Base Search",
@@ -121,13 +160,17 @@ def main():
         layout="wide"
     )
 
-    # Add authentication check
+    # Authentication
     if not setup_auth():
-        st.stop()  # Stop execution if not authenticated
-    
+        st.stop()
+
     # Get user info
     username = get_username()
     user_info = get_user_info()
+
+    # Initialize session if needed
+    if not st.session_state.session_id:
+        st.session_state.session_id = session_manager.create_session(username)
 
     initialize_session_state()
 
@@ -140,17 +183,18 @@ def main():
         st.error(f"Error initializing services: {str(e)}")
         return
 
-    # Modify your sidebar to include user info
+    # Sidebar
     with st.sidebar:
-        # Add user info and logout at the top of sidebar
         col1, col2 = st.columns([3, 1])
         with col1:
-            st.write(f"Welcome, {user_info['name']}")
+            st.title(f"Welcome, {user_info['name']}")
         with col2:
             if st.button("Logout"):
+                if st.session_state.session_id:
+                    session_manager.end_session(st.session_state.session_id)
                 logout()
                 st.rerun()
-
+        
         if st.button("New Chat", key="new_chat"):
             st.session_state.conversation = []
             st.session_state.current_chat_id = time.time()
@@ -161,7 +205,7 @@ def main():
         if st.button("Show Knowledge Base Summary"):
             try:
                 summary = qdrant_service.get_knowledge_base_summary()
-                st.info(summary)
+                st.info(summary['text'] if isinstance(summary, dict) else summary)
             except Exception as e:
                 st.error(f"Error fetching summary: {str(e)}")
         
@@ -176,18 +220,7 @@ def main():
 
         # Analytics section
         if st.checkbox("Show Analytics", key="show_analytics"):
-            st.markdown("### Analytics")
-            try:
-                feedback_stats = feedback_analyzer.analyze_feedback()
-                st.metric("Satisfaction Rate", f"{feedback_stats['satisfaction_rate']:.2%}")
-                st.metric("Total Responses", feedback_stats['total_responses'])
-                
-                if feedback_stats.get('recent_feedback'):
-                    st.markdown("### Recent Feedback")
-                    for feedback in feedback_stats['recent_feedback'][:5]:
-                        st.markdown(f"- {feedback['feedback']} ({feedback['timestamp'].strftime('%Y-%m-%d %H:%M')})")
-            except Exception as e:
-                st.error(f"Error loading analytics: {str(e)}")
+            show_analytics()
 
     # Main chat interface
     st.title("Chat Interface")
@@ -198,7 +231,13 @@ def main():
 
     # Chat input
     if query := st.chat_input("Ask a question..."):
-        # Check cache first
+        # Track query
+        analytics_manager.track_query(
+            query=query,
+            user_id=username
+        )
+        
+        # Check cache
         cached_response = cache_manager.get_cached_response(query)
         
         if cached_response:
@@ -214,6 +253,14 @@ def main():
                         ollama_service
                     )
                     cache_manager.cache_response(query, response)
+                    
+                    # Track search results
+                    if response.get('search_results'):
+                        analytics_manager.track_search_result(
+                            query=query,
+                            results=response['search_results'],
+                            user_id=username
+                        )
                 except Exception as e:
                     logger.error(f"Error processing query: {str(e)}")
                     response = {
@@ -226,6 +273,14 @@ def main():
             {"type": "user", "content": query},
             response
         ])
+
+        # Add query to session
+        if st.session_state.session_id:
+            session_manager.add_query_to_session(
+                st.session_state.session_id,
+                query,
+                response['content']
+            )
 
         # Update chat history
         if st.session_state.current_chat_id:
