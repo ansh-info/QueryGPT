@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from qdrant_client.http import models
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,12 @@ class EnhancedSearchService:
                 return []
 
             # Prepare filters for Qdrant
-            qdrant_filters = self._convert_filters(filters) if filters else None
+            qdrant_filter = self._convert_filters(filters)
             
             # Perform vector search
             raw_results = self.qdrant.search(
-                query_vector,
-                filters=qdrant_filters,
+                query_vector=query_vector,
+                query_filter=qdrant_filter,
                 limit=filters.max_results if filters else 10
             )
 
@@ -83,31 +84,47 @@ class EnhancedSearchService:
             logger.error(f"Error in search: {str(e)}")
             return []
 
-    def _convert_filters(self, filters: SearchFilter) -> Dict:
+    def _convert_filters(self, filters: SearchFilter) -> Optional[models.Filter]:
         """Convert SearchFilter to Qdrant filter format"""
-        if not filters:
-            return {}
+        try:
+            if not filters:
+                return None
 
-        qdrant_filters = {}
-        
-        if filters.date_range:
-            start_date, end_date = filters.date_range
-            qdrant_filters['timestamp'] = {
-                'gte': start_date.isoformat(),
-                'lte': end_date.isoformat()
-            }
-        
-        if filters.categories:
-            qdrant_filters['category'] = {
-                'in': filters.categories
-            }
+            must_conditions = []
             
-        if filters.sources:
-            qdrant_filters['source'] = {
-                'in': filters.sources
-            }
+            if filters.date_range:
+                start_date, end_date = filters.date_range
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="timestamp",
+                        range=models.Range(
+                            gte=start_date.isoformat(),
+                            lte=end_date.isoformat()
+                        )
+                    )
+                )
             
-        return qdrant_filters
+            if filters.categories:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="category",
+                        match=models.MatchAny(any=filters.categories)
+                    )
+                )
+                
+            if filters.sources:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="source",
+                        match=models.MatchAny(any=filters.sources)
+                    )
+                )
+                
+            return models.Filter(must=must_conditions) if must_conditions else None
+        
+        except Exception as e:
+            logger.error(f"Error converting filters: {str(e)}")
+            return None
 
     def _generate_highlights(self, query: str, content: str, context_words: int = 5) -> List[str]:
         """Generate highlighted snippets from content"""
