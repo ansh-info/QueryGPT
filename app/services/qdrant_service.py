@@ -318,3 +318,55 @@ class QdrantService:
         except Exception as e:
             logger.error(f"Error retrieving entry: {str(e)}")
             return None
+        
+    def get_categories(self) -> List[str]:
+        """Get all unique categories from the knowledge base"""
+        try:
+            entries = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1000,
+                with_payload=True
+            )[0]
+            
+            categories = set()
+            for entry in entries:
+                if 'category' in entry.payload:
+                    categories.add(entry.payload['category'])
+                else:
+                    categories.add('Uncategorized')  # Default category
+            
+            return sorted(list(categories))
+        except Exception as e:
+            logger.error(f"Error getting categories: {str(e)}")
+            return ['General']  # Return default category on error
+
+    def get_sources(self) -> List[str]:
+        """Get all unique sources from the knowledge base"""
+        try:
+            entries = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1000,
+                with_payload=True
+            )[0]
+            
+            sources = set()
+            for entry in entries:
+                if 'source' in entry.payload:
+                    sources.add(entry.payload['source'])
+                else:
+                    sources.add('Unknown')  # Default source
+            
+            return sorted(list(sources))
+        except Exception as e:
+            logger.error(f"Error getting sources: {str(e)}")
+            return ['General']  # Return default source on error
+
+    def get_recent_queries(self, limit: int = 100) -> List[str]:
+        """Get recent successful queries"""
+        try:
+            # You might want to store queries in a separate collection
+            # For now, we'll return an empty list or implement based on your needs
+            return []
+        except Exception as e:
+            logger.error(f"Error getting recent queries: {str(e)}")
+            return []

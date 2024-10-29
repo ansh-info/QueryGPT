@@ -15,6 +15,7 @@ from core.cache import CacheManager
 from services.qdrant_service import QdrantService
 from services.ollama_service import OllamaService
 from services.query_service import QueryProcessor
+from services.enhanced_search_service import EnhancedSearchService, SearchFilter
 from utils.analysis import FeedbackAnalyzer
 
 # Setup logging
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 # Initialize global services
 cache_manager = CacheManager()
 feedback_analyzer = FeedbackAnalyzer()
+qdrant_service = None
+enhanced_search_service = None 
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -49,6 +52,88 @@ def initialize_session_state():
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
+
+def render_search_interface():
+    """Render enhanced search interface"""
+    global enhanced_search_service
+    
+    st.markdown("### Advanced Search")
+    
+    # Search input with suggestions
+    query = st.text_input("Search the knowledge base...")
+    
+    # Search filters
+    with st.expander("Search Filters"):
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("From Date", value=None)
+        with col2:
+            end_date = st.date_input("To Date", value=None)
+            
+        # Category filter
+        categories = qdrant_service.get_categories()
+        selected_categories = st.multiselect("Categories", categories)
+        
+        # Source filter
+        sources = qdrant_service.get_sources()
+        selected_sources = st.multiselect("Sources", sources)
+        
+    if query:
+        # Create search filter with proper datetime conversion
+        search_filter = SearchFilter(
+            date_range=(
+                datetime.combine(start_date, datetime.min.time()),
+                datetime.combine(end_date, datetime.max.time())
+            ) if start_date and end_date else None,
+            categories=selected_categories if selected_categories else None,
+            sources=selected_sources if selected_sources else None,
+            max_results=10
+        )
+        
+        # Perform search
+        with st.spinner("Searching..."):
+            try:
+                results = enhanced_search_service.search(query, search_filter)
+                
+                # Display results
+                if results:
+                    # Show facets in sidebar
+                    facets = enhanced_search_service.get_facets(results)
+                    with st.sidebar:
+                        st.markdown("### Search Facets")
+                        st.markdown("#### Categories")
+                        for category, count in facets['categories'].items():
+                            st.markdown(f"- {category}: {count}")
+                        
+                        if facets['sources']:
+                            st.markdown("#### Sources")
+                            for source, count in facets['sources'].items():
+                                st.markdown(f"- {source}: {count}")
+                            
+                    # Display results
+                    st.markdown(f"Found {len(results)} results")
+                    for result in results:
+                        with st.container():
+                            st.markdown(f"**Score**: {result.score:.2f}")
+                            st.markdown(f"**Category**: {result.category}")
+                            st.markdown(f"**Source**: {result.source}")
+                            
+                            # Show highlights
+                            if result.highlights:
+                                with st.expander("Matching Excerpts"):
+                                    for highlight in result.highlights:
+                                        st.markdown(f"...{highlight}...")
+                            
+                            # Show full content
+                            with st.expander("Full Content"):
+                                st.markdown(result.content)
+                            
+                            st.markdown("---")
+                else:
+                    st.info("No results found.")
+            except Exception as e:
+                logger.error(f"Search error: {str(e)}")
+                st.error("An error occurred while searching. Please try again.")
 
 def handle_error(error: Exception, error_type: str = "General"):
     """Handle errors with user-friendly messages"""
@@ -245,9 +330,11 @@ def main():
 
     # Initialize services
     try:
+        global qdrant_service, enhanced_search_service 
         qdrant_service = QdrantService()
         ollama_service = OllamaService()
         query_processor = QueryProcessor()
+        enhanced_search_service = EnhancedSearchService(qdrant_service, ollama_service)
     except Exception as e:
         handle_error(e, "Service")
         return
@@ -289,66 +376,72 @@ def main():
         if st.checkbox("Show Analytics", key="show_analytics"):
             show_analytics()
 
-    # Main chat interface
-    st.title("Chat Interface")
+    # Main interface with tabs
+    tab1, tab2 = st.tabs(["Chat", "Advanced Search"])
     
-    # Display conversation
-    for idx, message in enumerate(st.session_state.conversation):
-        render_message(message, idx)
-
-    # Chat input
-    if query := st.chat_input("Ask a question..."):
-        # Check cache
-        cached_response = cache_manager.get_cached_response(query)
+    with tab1:
+        st.title("Chat Interface")
         
-        if cached_response:
-            response = cached_response
-            st.success("Retrieved from cache")
-        else:
-            # Process new query
-            with st.spinner("Processing your query..."):
-                try:
-                    response = query_processor.process_query(
-                        query,
-                        qdrant_service,
-                        ollama_service
-                    )
-                    cache_manager.cache_response(query, response)
-                except Exception as e:
-                    logger.error(f"Error processing query: {str(e)}")
-                    response = {
-                        "type": "error",
-                        "content": "I apologize, but I encountered an error processing your request. Please try again."
-                    }
+        # Display conversation
+        for idx, message in enumerate(st.session_state.conversation):
+            render_message(message, idx)
 
-        # Add timestamp to messages
-        user_message = {
-            "type": "user",
-            "content": query,
-            "timestamp": datetime.now()
-        }
-        response["timestamp"] = datetime.now()
+        # Chat input
+        if query := st.chat_input("Ask a question..."):
+            # Check cache
+            cached_response = cache_manager.get_cached_response(query)
+            
+            if cached_response:
+                response = cached_response
+                st.success("Retrieved from cache")
+            else:
+                # Process new query
+                with st.spinner("Processing your query..."):
+                    try:
+                        response = query_processor.process_query(
+                            query,
+                            qdrant_service,
+                            ollama_service
+                        )
+                        cache_manager.cache_response(query, response)
+                    except Exception as e:
+                        logger.error(f"Error processing query: {str(e)}")
+                        response = {
+                            "type": "error",
+                            "content": "I apologize, but I encountered an error processing your request. Please try again."
+                        }
 
-        # Update conversation
-        st.session_state.conversation.extend([user_message, response])
+            # Add timestamp to messages
+            user_message = {
+                "type": "user",
+                "content": query,
+                "timestamp": datetime.now()
+            }
+            response["timestamp"] = datetime.now()
 
-        # Update chat history
-        if st.session_state.current_chat_id:
-            chat_exists = False
-            for chat in st.session_state.chats:
-                if chat['id'] == st.session_state.current_chat_id:
-                    chat['messages'] = st.session_state.conversation
-                    chat['timestamp'] = datetime.now()
-                    chat_exists = True
-                    break
-            if not chat_exists:
-                st.session_state.chats.append({
-                    'id': st.session_state.current_chat_id,
-                    'messages': st.session_state.conversation,
-                    'timestamp': datetime.now()
-                })
-        
-        st.rerun()
+            # Update conversation
+            st.session_state.conversation.extend([user_message, response])
+
+            # Update chat history
+            if st.session_state.current_chat_id:
+                chat_exists = False
+                for chat in st.session_state.chats:
+                    if chat['id'] == st.session_state.current_chat_id:
+                        chat['messages'] = st.session_state.conversation
+                        chat['timestamp'] = datetime.now()
+                        chat_exists = True
+                        break
+                if not chat_exists:
+                    st.session_state.chats.append({
+                        'id': st.session_state.current_chat_id,
+                        'messages': st.session_state.conversation,
+                        'timestamp': datetime.now()
+                    })
+            
+            st.rerun()
+            
+    with tab2:
+        render_search_interface()
 
 if __name__ == "__main__":
     main()
