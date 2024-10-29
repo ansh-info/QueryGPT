@@ -55,7 +55,7 @@ def initialize_session_state():
 
 def render_search_interface():
     """Render enhanced search interface"""
-    global enhanced_search_service  # Add this line
+    global enhanced_search_service
     
     st.markdown("### Advanced Search")
     
@@ -66,9 +66,9 @@ def render_search_interface():
     with st.expander("Search Filters"):
         col1, col2 = st.columns(2)
         with col1:
-            start_date = st.date_input("From Date")
+            start_date = st.date_input("From Date", value=None)
         with col2:
-            end_date = st.date_input("To Date")
+            end_date = st.date_input("To Date", value=None)
             
         # Category filter
         categories = qdrant_service.get_categories()
@@ -79,9 +79,12 @@ def render_search_interface():
         selected_sources = st.multiselect("Sources", sources)
         
     if query:
-        # Create search filter
+        # Create search filter with proper datetime conversion
         search_filter = SearchFilter(
-            date_range=(start_date, end_date) if start_date and end_date else None,
+            date_range=(
+                datetime.combine(start_date, datetime.min.time()),
+                datetime.combine(end_date, datetime.max.time())
+            ) if start_date and end_date else None,
             categories=selected_categories if selected_categories else None,
             sources=selected_sources if selected_sources else None,
             max_results=10
@@ -89,38 +92,48 @@ def render_search_interface():
         
         # Perform search
         with st.spinner("Searching..."):
-            results = enhanced_search_service.search(query, search_filter)
-            
-        # Display results
-        if results:
-            # Show facets in sidebar
-            facets = enhanced_search_service.get_facets(results)
-            with st.sidebar:
-                st.markdown("### Search Facets")
-                st.markdown("#### Categories")
-                for category, count in facets['categories'].items():
-                    st.markdown(f"- {category}: {count}")
-                    
-            # Display results
-            for result in results:
-                with st.container():
-                    st.markdown(f"**Score**: {result.score:.2f}")
-                    st.markdown(f"**Category**: {result.category}")
-                    st.markdown(f"**Source**: {result.source}")
-                    
-                    # Show highlights
-                    if result.highlights:
-                        with st.expander("Matching Excerpts"):
-                            for highlight in result.highlights:
-                                st.markdown(f"...{highlight}...")
-                    
-                    # Show full content
-                    with st.expander("Full Content"):
-                        st.markdown(result.content)
-                    
-                    st.markdown("---")
-        else:
-            st.info("No results found.")
+            try:
+                results = enhanced_search_service.search(query, search_filter)
+                
+                # Display results
+                if results:
+                    # Show facets in sidebar
+                    facets = enhanced_search_service.get_facets(results)
+                    with st.sidebar:
+                        st.markdown("### Search Facets")
+                        st.markdown("#### Categories")
+                        for category, count in facets['categories'].items():
+                            st.markdown(f"- {category}: {count}")
+                        
+                        if facets['sources']:
+                            st.markdown("#### Sources")
+                            for source, count in facets['sources'].items():
+                                st.markdown(f"- {source}: {count}")
+                            
+                    # Display results
+                    st.markdown(f"Found {len(results)} results")
+                    for result in results:
+                        with st.container():
+                            st.markdown(f"**Score**: {result.score:.2f}")
+                            st.markdown(f"**Category**: {result.category}")
+                            st.markdown(f"**Source**: {result.source}")
+                            
+                            # Show highlights
+                            if result.highlights:
+                                with st.expander("Matching Excerpts"):
+                                    for highlight in result.highlights:
+                                        st.markdown(f"...{highlight}...")
+                            
+                            # Show full content
+                            with st.expander("Full Content"):
+                                st.markdown(result.content)
+                            
+                            st.markdown("---")
+                else:
+                    st.info("No results found.")
+            except Exception as e:
+                logger.error(f"Search error: {str(e)}")
+                st.error("An error occurred while searching. Please try again.")
 
 def handle_error(error: Exception, error_type: str = "General"):
     """Handle errors with user-friendly messages"""
