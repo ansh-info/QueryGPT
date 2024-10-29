@@ -45,10 +45,10 @@ class EnhancedSearchService:
             # Prepare filters for Qdrant
             qdrant_filter = self._convert_filters(filters)
             
-            # Perform vector search
+            # Perform vector search with corrected parameter name
             raw_results = self.qdrant.search(
                 query_vector=query_vector,
-                query_filter=qdrant_filter,
+                filters=qdrant_filter,  # Changed from query_filter to filters
                 limit=filters.max_results if filters else 10
             )
 
@@ -89,47 +89,36 @@ class EnhancedSearchService:
             logger.error(f"Error in search: {str(e)}")
             return []
 
-    def _convert_filters(self, filters: Optional[SearchFilter]) -> Optional[models.Filter]:
+    def _convert_filters(self, filters: Optional[SearchFilter]) -> Dict[str, Any]:
         """Convert SearchFilter to Qdrant filter format"""
         try:
             if not filters:
-                return None
+                return {}
 
-            must_conditions = []
+            filter_dict = {}
             
             if filters.date_range:
                 start_date, end_date = filters.date_range
-                must_conditions.append(
-                    models.FieldCondition(
-                        key="timestamp",
-                        range=models.Range(
-                            gte=start_date.isoformat(),
-                            lte=end_date.isoformat()
-                        )
-                    )
-                )
+                filter_dict['timestamp'] = {
+                    'gte': start_date.isoformat(),
+                    'lte': end_date.isoformat()
+                }
             
             if filters.categories:
-                must_conditions.append(
-                    models.FieldCondition(
-                        key="category",
-                        match=models.MatchAny(any=filters.categories)
-                    )
-                )
+                filter_dict['category'] = {
+                    'in': filters.categories
+                }
                 
             if filters.sources:
-                must_conditions.append(
-                    models.FieldCondition(
-                        key="source",
-                        match=models.MatchAny(any=filters.sources)
-                    )
-                )
+                filter_dict['source'] = {
+                    'in': filters.sources
+                }
                 
-            return models.Filter(must=must_conditions) if must_conditions else None
+            return filter_dict
         
         except Exception as e:
             logger.error(f"Error converting filters: {str(e)}")
-            return None
+            return {}
 
     def _generate_highlights(self, query: str, content: str, context_words: int = 5) -> List[str]:
         """Generate highlighted snippets from content"""
