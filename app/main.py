@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 # Initialize global services
 cache_manager = CacheManager()
 feedback_analyzer = FeedbackAnalyzer()
+qdrant_service = None
+enhanced_search_service = None 
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -53,6 +55,8 @@ def initialize_session_state():
 
 def render_search_interface():
     """Render enhanced search interface"""
+    global enhanced_search_service  # Add this line
+    
     st.markdown("### Advanced Search")
     
     # Search input with suggestions
@@ -313,7 +317,7 @@ def main():
 
     # Initialize services
     try:
-        global qdrant_service
+        global qdrant_service, enhanced_search_service 
         qdrant_service = QdrantService()
         ollama_service = OllamaService()
         query_processor = QueryProcessor()
