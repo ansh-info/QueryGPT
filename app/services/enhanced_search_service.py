@@ -55,7 +55,7 @@ class EnhancedSearchService:
             # Process results
             enhanced_results = []
             for result in raw_results:
-                if result.score < self.min_semantic_score:
+                if hasattr(result, 'score') and result.score < self.min_semantic_score:
                     continue
 
                 # Generate result highlights
@@ -64,17 +64,22 @@ class EnhancedSearchService:
                     result.payload.get('original_content', '')
                 )
 
+                try:
+                    timestamp = datetime.fromisoformat(
+                        result.payload.get('timestamp', datetime.now().isoformat())
+                    )
+                except (ValueError, TypeError):
+                    timestamp = datetime.now()
+
                 # Create structured result
                 search_result = SearchResult(
                     content=result.payload.get('original_content', ''),
-                    score=result.score,
+                    score=getattr(result, 'score', 0.0),
                     metadata=result.payload.get('metadata', {}),
                     highlights=highlights,
                     category=result.payload.get('category', 'Unknown'),
                     source=result.payload.get('source', 'Unknown'),
-                    timestamp=datetime.fromisoformat(
-                        result.payload.get('timestamp', datetime.now().isoformat())
-                    )
+                    timestamp=timestamp
                 )
                 enhanced_results.append(search_result)
 
@@ -84,7 +89,7 @@ class EnhancedSearchService:
             logger.error(f"Error in search: {str(e)}")
             return []
 
-    def _convert_filters(self, filters: SearchFilter) -> Optional[models.Filter]:
+    def _convert_filters(self, filters: Optional[SearchFilter]) -> Optional[models.Filter]:
         """Convert SearchFilter to Qdrant filter format"""
         try:
             if not filters:
