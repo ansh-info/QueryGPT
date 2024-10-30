@@ -6,9 +6,8 @@ from typing import Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from ..config.database import get_db, init_db
-from ..models.user import User, UserSession
-from ..utils.security import create_jwt_token, verify_jwt_token
+from app.database.connection import get_db, init_db
+from app.database.models import User, UserSession
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +85,16 @@ class Authenticator:
             user.failed_login_attempts = 0
             user.last_login = datetime.utcnow()
             
-            # Create session
-            token = create_jwt_token({'username': username}, self.jwt_secret)
+            # Create session and JWT token
+            token = jwt.encode(
+                {
+                    'username': username,
+                    'exp': datetime.utcnow() + self.session_duration
+                },
+                self.jwt_secret,
+                algorithm='HS256'
+            )
+            
             session = UserSession(
                 user_id=user.id,
                 token=token,
