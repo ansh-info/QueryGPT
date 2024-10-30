@@ -1,98 +1,34 @@
 import streamlit as st
-import yaml
-from yaml.loader import SafeLoader
-import os
-import bcrypt
-from datetime import datetime, timedelta
 import jwt
 import logging
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+
+from ..config.database import get_db, init_db
+from ..models.user import User, UserSession
+from ..utils.security import create_jwt_token, verify_jwt_token
 
 logger = logging.getLogger(__name__)
 
 class Authenticator:
-    def __init__(self, config_path: str = "config/config.yaml"):
-        """Initialize Authenticator with config path"""
-        self.config_path = config_path
-        self.config = self.load_config()
-        self.jwt_secret = os.getenv('JWT_SECRET', 'your-secret-key')  # In production, use env var
+    def __init__(self):
+        """Initialize Authenticator"""
+        self.jwt_secret = st.secrets.get("jwt_secret", "your-secret-key")
         self.session_duration = timedelta(days=1)
-
-    def load_config(self) -> Dict:
-        """Load configuration from yaml file"""
-        try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path) as file:
-                    return yaml.load(file, Loader=SafeLoader)
-            return self.create_default_config()
-        except Exception as e:
-            logger.error(f"Error loading config: {str(e)}")
-            return self.create_default_config()
-
-    def create_default_config(self) -> Dict:
-        """Create default configuration"""
-        return {
-            'credentials': {
-                'usernames': {}
-            },
-            'cookie': {
-                'name': 'auth_token',
-                'expiry_days': 1,
-                'key': 'some_signature_key'
-            }
-        }
-
-    def save_config(self):
-        """Save current configuration to file"""
-        try:
-            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-            with open(self.config_path, 'w') as file:
-                yaml.dump(self.config, file)
-            logger.info("Configuration saved successfully")
-        except Exception as e:
-            logger.error(f"Error saving config: {str(e)}")
-
-    def hash_password(self, password: str) -> str:
-        """Hash password using bcrypt"""
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-    def verify_password(self, password: str, hashed: str) -> bool:
-        """Verify password against hash"""
-        try:
-            return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-        except Exception as e:
-            logger.error(f"Error verifying password: {str(e)}")
-            return False
-
-    def create_token(self, username: str) -> str:
-        """Create JWT token for user"""
-        try:
-            payload = {
-                'username': username,
-                'exp': datetime.utcnow() + self.session_duration
-            }
-            return jwt.encode(payload, self.jwt_secret, algorithm='HS256')
-        except Exception as e:
-            logger.error(f"Error creating token: {str(e)}")
-            raise
-
-    def verify_token(self, token: str) -> Optional[str]:
-        """Verify JWT token and return username"""
-        try:
-            payload = jwt.decode(token, self.jwt_secret, algorithms=['HS256'])
-            return payload.get('username')
-        except jwt.ExpiredSignatureError:
-            logger.warning("Token has expired")
-            return None
-        except jwt.InvalidTokenError as e:
-            logger.error(f"Invalid token: {str(e)}")
-            return None
+        init_db()  # Initialize database tables
 
     def signup(self, username: str, password: str, email: str, name: str) -> Tuple[bool, str]:
         """Handle user signup"""
         try:
-            if username in self.config['credentials']['usernames']:
-                return False, "Username already exists"
+            db = next(get_db())
+            
+            # Check if user exists
+            if db.query(User).filter(
+                (User.username == username) | (User.email == email)
+            ).first():
+                return False, "Username or email already exists"
 
             if not self._validate_password(password):
                 return False, "Password does not meet requirements"
@@ -100,38 +36,138 @@ class Authenticator:
             if not self._validate_email(email):
                 return False, "Invalid email format"
 
-            self.config['credentials']['usernames'][username] = {
-                'email': email,
-                'name': name,
-                'password': self.hash_password(password),
-                'created_at': datetime.now().isoformat(),
-                'role': 'user'  # Default role
-            }
+            # Create new user
+            new_user = User(
+                username=username,
+                email=email,
+                name=name,
+                created_at=datetime.utcnow()
+            )
+            new_user.set_password(password)
             
-            self.save_config()
+            db.add(new_user)
+            db.commit()
             logger.info(f"New user signed up: {username}")
             return True, "Signup successful"
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error during signup: {str(e)}")
+            return False, "An error occurred during signup"
         except Exception as e:
             logger.error(f"Error during signup: {str(e)}")
             return False, "An error occurred during signup"
+        finally:
+            db.close()
 
     def login(self, username: str, password: str) -> Tuple[bool, str]:
         """Handle user login"""
         try:
-            if username not in self.config['credentials']['usernames']:
+            db = next(get_db())
+            user = db.query(User).filter(User.username == username).first()
+            
+            if not user:
                 return False, "Username not found"
             
-            user_data = self.config['credentials']['usernames'][username]
-            if self.verify_password(password, user_data['password']):
-                token = self.create_token(username)
-                st.session_state.token = token
-                logger.info(f"User logged in: {username}")
-                return True, "Login successful"
+            if not user.is_active:
+                return False, "Account is deactivated"
+
+            if user.locked_until and user.locked_until > datetime.utcnow():
+                return False, f"Account is locked until {user.locked_until}"
+
+            if not user.check_password(password):
+                # Handle failed login attempts
+                user.failed_login_attempts += 1
+                if user.failed_login_attempts >= 5:
+                    user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+                db.commit()
+                return False, "Incorrect password"
+
+            # Reset failed attempts and update last login
+            user.failed_login_attempts = 0
+            user.last_login = datetime.utcnow()
             
-            return False, "Incorrect password"
+            # Create session
+            token = create_jwt_token({'username': username}, self.jwt_secret)
+            session = UserSession(
+                user_id=user.id,
+                token=token,
+                expires_at=datetime.utcnow() + self.session_duration
+            )
+            
+            db.add(session)
+            db.commit()
+            
+            # Store in Streamlit session state
+            st.session_state.token = token
+            st.session_state.username = username
+            
+            logger.info(f"User logged in: {username}")
+            return True, "Login successful"
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error during login: {str(e)}")
+            return False, "An error occurred during login"
         except Exception as e:
             logger.error(f"Error during login: {str(e)}")
             return False, "An error occurred during login"
+        finally:
+            db.close()
+
+    def verify_session(self) -> Optional[Dict[str, Any]]:
+        """Verify current session"""
+        try:
+            token = st.session_state.get('token')
+            if not token:
+                return None
+
+            db = next(get_db())
+            session = db.query(UserSession).filter(
+                UserSession.token == token,
+                UserSession.is_active == True,
+                UserSession.expires_at > datetime.utcnow()
+            ).first()
+
+            if not session:
+                return None
+
+            user = db.query(User).get(session.user_id)
+            if not user or not user.is_active:
+                return None
+
+            return {
+                'user_id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role,
+                'name': user.name
+            }
+
+        except Exception as e:
+            logger.error(f"Error verifying session: {str(e)}")
+            return None
+        finally:
+            db.close()
+
+    def logout(self):
+        """Log out the current user"""
+        try:
+            if 'token' in st.session_state:
+                db = next(get_db())
+                session = db.query(UserSession).filter(
+                    UserSession.token == st.session_state.token
+                ).first()
+                if session:
+                    session.is_active = False
+                    db.commit()
+
+            # Clear session state
+            st.session_state.clear()
+            logger.info("User logged out successfully")
+            
+        except Exception as e:
+            logger.error(f"Error during logout: {str(e)}")
+        finally:
+            db.close()
 
     def _validate_password(self, password: str) -> bool:
         """Validate password strength"""
@@ -151,93 +187,44 @@ class Authenticator:
         pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
         return bool(re.match(pattern, email))
 
-    def change_password(self, username: str, old_password: str, new_password: str) -> Tuple[bool, str]:
-        """Change user password"""
-        try:
-            if username not in self.config['credentials']['usernames']:
-                return False, "User not found"
-            
-            user_data = self.config['credentials']['usernames'][username]
-            if not self.verify_password(old_password, user_data['password']):
-                return False, "Incorrect current password"
-            
-            if not self._validate_password(new_password):
-                return False, "New password does not meet requirements"
-            
-            user_data['password'] = self.hash_password(new_password)
-            user_data['password_updated_at'] = datetime.now().isoformat()
-            self.save_config()
-            
-            return True, "Password changed successfully"
-        except Exception as e:
-            logger.error(f"Error changing password: {str(e)}")
-            return False, "An error occurred while changing password"
-
-    def update_user_info(self, username: str, updates: Dict[str, Any]) -> Tuple[bool, str]:
-        """Update user information"""
-        try:
-            if username not in self.config['credentials']['usernames']:
-                return False, "User not found"
-            
-            user_data = self.config['credentials']['usernames'][username]
-            allowed_fields = {'name', 'email'}
-            
-            for field, value in updates.items():
-                if field in allowed_fields:
-                    if field == 'email' and not self._validate_email(value):
-                        return False, "Invalid email format"
-                    user_data[field] = value
-            
-            user_data['updated_at'] = datetime.now().isoformat()
-            self.save_config()
-            
-            return True, "User information updated successfully"
-        except Exception as e:
-            logger.error(f"Error updating user info: {str(e)}")
-            return False, "An error occurred while updating user information"
-
 def setup_auth():
     """Setup and handle authentication in Streamlit"""
     if 'authentication_status' not in st.session_state:
         st.session_state.authentication_status = None
-    if 'username' not in st.session_state:
-        st.session_state.username = None
-    if 'show_signup' not in st.session_state:
-        st.session_state.show_signup = False
 
     authenticator = Authenticator()
+
+    # Verify existing session
+    if st.session_state.get('token'):
+        user_info = authenticator.verify_session()
+        if user_info:
+            st.session_state.authentication_status = True
+            return True
+        else:
+            st.session_state.clear()
 
     if not st.session_state.authentication_status:
         st.title('Welcome to Knowledge Base Search')
 
-        if not st.session_state.show_signup:
-            # Login Form
+        tab1, tab2 = st.tabs(["Login", "Sign Up"])
+        
+        with tab1:
             with st.form("login_form"):
-                st.subheader("Login")
                 username = st.text_input('Username')
                 password = st.text_input('Password', type='password')
                 
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    login_submitted = st.form_submit_button('Login')
-                with col2:
-                    if st.form_submit_button('Need to Sign Up?'):
-                        st.session_state.show_signup = True
-                        st.rerun()
-
-                if login_submitted and username and password:
-                    success, message = authenticator.login(username, password)
-                    if success:
-                        st.session_state.authentication_status = True
-                        st.session_state.username = username
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-        else:
-            # Signup Form
+                if st.form_submit_button('Login'):
+                    if username and password:
+                        success, message = authenticator.login(username, password)
+                        if success:
+                            st.session_state.authentication_status = True
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+        
+        with tab2:
             with st.form("signup_form"):
-                st.subheader("Sign Up")
                 new_username = st.text_input('Choose Username')
                 new_password = st.text_input('Choose Password', type='password',
                     help="Password must be at least 8 characters long and contain uppercase, lowercase, and numbers")
@@ -245,15 +232,7 @@ def setup_auth():
                 email = st.text_input('Email')
                 name = st.text_input('Full Name')
                 
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    signup_submitted = st.form_submit_button('Sign Up')
-                with col2:
-                    if st.form_submit_button('Back to Login'):
-                        st.session_state.show_signup = False
-                        st.rerun()
-
-                if signup_submitted:
+                if st.form_submit_button('Sign Up'):
                     if not all([new_username, new_password, confirm_password, email, name]):
                         st.error("Please fill in all fields")
                     elif new_password != confirm_password:
@@ -262,29 +241,35 @@ def setup_auth():
                         success, message = authenticator.signup(new_username, new_password, email, name)
                         if success:
                             st.success(message)
-                            st.session_state.show_signup = False
                             st.rerun()
                         else:
                             st.error(message)
 
-    return st.session_state.authentication_status
+        return False
+
+    return True
 
 def get_username():
     """Get the current authenticated username"""
-    return st.session_state.get('username', None)
+    return st.session_state.get('username')
 
 def get_user_info():
     """Get information about the current user"""
-    authenticator = Authenticator()
-    username = get_username()
-    if username:
-        return authenticator.config['credentials']['usernames'][username]
+    try:
+        db = next(get_db())
+        username = get_username()
+        if username:
+            user = db.query(User).filter(User.username == username).first()
+            if user:
+                return {
+                    'username': user.username,
+                    'email': user.email,
+                    'name': user.name,
+                    'role': user.role,
+                    'created_at': user.created_at
+                }
+    except Exception as e:
+        logger.error(f"Error getting user info: {str(e)}")
+    finally:
+        db.close()
     return None
-
-def logout():
-    """Log out the current user"""
-    st.session_state.authentication_status = None
-    st.session_state.username = None
-    st.session_state.show_signup = False
-    if 'token' in st.session_state:
-        del st.session_state.token
