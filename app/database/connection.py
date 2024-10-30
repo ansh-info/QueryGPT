@@ -2,6 +2,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Database URL construction
 DB_USER = os.getenv('DB_USER', 'admin')
@@ -24,8 +28,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
-# Database session context manager
 def get_db():
+    """Database session generator"""
     db = SessionLocal()
     try:
         yield db
