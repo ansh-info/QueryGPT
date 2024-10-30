@@ -1,20 +1,25 @@
 import streamlit as st
 import jwt
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from dotenv import load_dotenv
 
 from app.database.connection import get_db, init_db
 from app.database.models import User, UserSession
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class Authenticator:
     def __init__(self):
         """Initialize Authenticator"""
-        self.jwt_secret = st.secrets.get("jwt_secret", "your-secret-key")
+        self.jwt_secret = os.getenv('JWT_SECRET', 'your-secret-key')
         self.session_duration = timedelta(days=1)
         init_db()  # Initialize database tables
 
@@ -155,7 +160,7 @@ class Authenticator:
         finally:
             db.close()
 
-    def logout(self):
+    def logout_user(self):
         """Log out the current user"""
         try:
             if 'token' in st.session_state:
@@ -194,16 +199,17 @@ class Authenticator:
         pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
         return bool(re.match(pattern, email))
 
+# Create a global authenticator instance
+_authenticator = Authenticator()
+
 def setup_auth():
     """Setup and handle authentication in Streamlit"""
     if 'authentication_status' not in st.session_state:
         st.session_state.authentication_status = None
 
-    authenticator = Authenticator()
-
     # Verify existing session
     if st.session_state.get('token'):
-        user_info = authenticator.verify_session()
+        user_info = _authenticator.verify_session()
         if user_info:
             st.session_state.authentication_status = True
             return True
@@ -222,7 +228,7 @@ def setup_auth():
                 
                 if st.form_submit_button('Login'):
                     if username and password:
-                        success, message = authenticator.login(username, password)
+                        success, message = _authenticator.login(username, password)
                         if success:
                             st.session_state.authentication_status = True
                             st.success(message)
@@ -245,7 +251,7 @@ def setup_auth():
                     elif new_password != confirm_password:
                         st.error("Passwords do not match")
                     else:
-                        success, message = authenticator.signup(new_username, new_password, email, name)
+                        success, message = _authenticator.signup(new_username, new_password, email, name)
                         if success:
                             st.success(message)
                             st.rerun()
@@ -280,3 +286,8 @@ def get_user_info():
     finally:
         db.close()
     return None
+
+def logout():
+    """Global logout function"""
+    _authenticator.logout_user()
+    st.rerun()
