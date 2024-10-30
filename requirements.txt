@@ -168,6 +168,8 @@ python-dotenv
 python-json-logger
 pytz
 pyzmq
+python-jose
+psycopg2
 qtconsole
 QtPy
 referencing
@@ -206,6 +208,7 @@ srsly
 stack-data
 statsmodels
 streamlit
+streamlit-option-menu
 tenacity
 terminado
 textblob
