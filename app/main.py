@@ -17,6 +17,7 @@ from services.ollama_service import OllamaService
 from services.query_service import QueryProcessor
 from services.enhanced_search_service import EnhancedSearchService, SearchFilter
 from utils.analysis import FeedbackAnalyzer
+from app.auth.authenticator import setup_auth, get_username, get_user_info, logout
 
 # Setup logging
 logging.basicConfig(

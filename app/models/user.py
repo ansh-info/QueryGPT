@@ -4,7 +4,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import bcrypt
 
-from ..config.database import Base
+from ...config.database import Base
 
 class User(Base):
     __tablename__ = "users"
