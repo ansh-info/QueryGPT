@@ -342,11 +342,12 @@ def main():
 
     # Sidebar
     with st.sidebar:
-        # User info and logout
         col1, col2 = st.columns([3, 1])
         with col1:
             st.title(f"Welcome, {user_info['name']}")
         with col2:
+            if st.button("Profile"):
+                st.switch_page("pages/profile.py")
             if st.button("Logout"):
                 logout()
                 st.rerun()
