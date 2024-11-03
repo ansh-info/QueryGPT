@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+    # Pull models during container initialization
+    command: >
+      sh -c "
+        ollama serve &
+        sleep 10 &&
+        ollama pull nomic-embed-text &&
+        ollama pull llama3.2 &&
+        ollama pull llama3.1 &&
+        # Keep container running
+        tail -f /dev/null
+      "
+
+  postgres:
+    image: postgres
+    container_name: postgres-db
+    environment:
+      POSTGRES_DB: knowledge_base
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  ollama:
+  pgdata:
