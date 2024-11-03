@@ -69,3 +69,26 @@ def _validate_password(password: str) -> bool:
     if not any(c.isdigit() for c in password):
         return False
     return True
+
+def get_user_sessions(username: str, limit: int = 5):
+    """Get recent user sessions"""
+    try:
+        db = next(get_db())
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+            
+        # Query sessions directly through the user object
+        sessions = (
+            db.query(UserSession)
+            .filter(UserSession.user_id == user.id)
+            .order_by(desc(UserSession.created_at))
+            .limit(limit)
+            .all()
+        )
+        return sessions
+    except Exception as e:
+        logger.error(f"Error fetching user sessions: {str(e)}")
+        return []
+    finally:
+        db.close()
